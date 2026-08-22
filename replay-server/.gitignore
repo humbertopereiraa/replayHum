@@ -1,0 +1,11 @@
+# Segredos locais
+config.json
+
+# Dados gerados em runtime (vídeo, segmentos, thumbnails)
+buffer/
+replays/
+
+# Binários
+*.exe
+*.test
+*.out
