@@ -40,7 +40,7 @@ router.get('/:id/download', autenticarAluno, async (req: Request, res: Response)
     return;
   }
 
-  const url = await gerarUrlDownload(replay.b2_key_video, 300);
+  const url = await gerarUrlDownload(replay.b2_key_video, 300, `replay-${replay.id}.mp4`);
   res.json({ url, expira_em_segundos: 300 });
 });
 

@@ -74,5 +74,17 @@ describe('b2.service', () => {
         { expiresIn: 600 }
       );
     });
+
+    it('deve incluir Content-Disposition quando o nome do arquivo é informado', async () => {
+      const chave = '1/quadra/123.mp4';
+
+      await gerarUrlDownload(chave, 300, 'replay-123.mp4');
+
+      expect(GetObjectCommand).toHaveBeenCalledWith({
+        Bucket: 'bucket-test',
+        Key: chave,
+        ResponseContentDisposition: 'attachment; filename="replay-123.mp4"',
+      });
+    });
   });
 });

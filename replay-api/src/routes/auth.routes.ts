@@ -7,9 +7,33 @@ import {
   emitirToken,
   lerTokenValido,
 } from '../services/auth-token.service';
+import { autenticarAluno } from '../middleware/auth';
 import type { Student } from '../types';
 
 const router = express.Router();
+
+type PerfilAluno = {
+  aluno: { nome: string };
+  unidade: { nome: string };
+};
+
+async function buscarPerfilAluno(studentId: number): Promise<PerfilAluno | null> {
+  const { rows } = await pool.query<{ aluno_nome: string; unidade_nome: string }>(
+    `SELECT s.nome AS aluno_nome, u.nome AS unidade_nome
+     FROM students s
+     JOIN units u ON u.id = s.unit_id
+     WHERE s.id = $1 AND s.status = 'ativo'`,
+    [studentId]
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    aluno: { nome: row.aluno_nome },
+    unidade: { nome: row.unidade_nome },
+  };
+}
 
 router.post('/request-otp', async (req: Request, res: Response) => {
   const { email } = req.body as { email?: string };
@@ -35,7 +59,12 @@ router.post('/request-otp', async (req: Request, res: Response) => {
 
   if (sessao && sessao.payload.studentId === aluno.id) {
     aplicarCookieToken(res, sessao.token);
-    res.json({ status: 'autenticado', token: sessao.token });
+    const perfil = await buscarPerfilAluno(aluno.id);
+    res.json({
+      status: 'autenticado',
+      token: sessao.token,
+      ...(perfil ?? { aluno: { nome: aluno.nome }, unidade: { nome: '' } }),
+    });
     return;
   }
 
@@ -72,7 +101,22 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
   const token = emitirToken(aluno);
   aplicarCookieToken(res, token);
 
-  res.json({ status: 'autenticado', token });
+  const perfil = await buscarPerfilAluno(aluno.id);
+  res.json({
+    status: 'autenticado',
+    token,
+    ...(perfil ?? { aluno: { nome: '' }, unidade: { nome: '' } }),
+  });
+});
+
+router.get('/me', autenticarAluno, async (req: Request, res: Response) => {
+  const perfil = await buscarPerfilAluno(req.studentId!);
+  if (!perfil) {
+    res.status(404).json({ erro: 'aluno não encontrado' });
+    return;
+  }
+
+  res.json(perfil);
 });
 
 export default router;

@@ -31,8 +31,15 @@ export async function enviarArquivo(
 
 export async function gerarUrlDownload(
   chave: string,
-  expiraEmSegundos = 300
+  expiraEmSegundos = 300,
+  nomeArquivo?: string
 ): Promise<string> {
-  const comando = new GetObjectCommand({ Bucket: BUCKET, Key: chave });
+  const comando = new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: chave,
+    ...(nomeArquivo
+      ? { ResponseContentDisposition: `attachment; filename="${nomeArquivo}"` }
+      : {}),
+  });
   return getSignedUrl(s3, comando, { expiresIn: expiraEmSegundos });
 }

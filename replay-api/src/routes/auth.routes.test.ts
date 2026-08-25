@@ -69,8 +69,13 @@ describe('auth.routes', () => {
       expect(mockSolicitarCodigo).toHaveBeenCalledWith(10, 'aluno@test.com', 'João');
     });
 
-    it('deve devolver token sem enviar email quando já autenticado', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 });
+    it('deve devolver token e perfil sem enviar email quando já autenticado', async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 })
+        .mockResolvedValueOnce({
+          rows: [{ aluno_nome: 'João', unidade_nome: 'Arena Central' }],
+          rowCount: 1,
+        });
       mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
 
       const response = await request(createApp())
@@ -79,7 +84,12 @@ describe('auth.routes', () => {
         .send({ email: 'aluno@test.com' });
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'autenticado', token: 'jwt-existente' });
+      expect(response.body).toEqual({
+        status: 'autenticado',
+        token: 'jwt-existente',
+        aluno: { nome: 'João' },
+        unidade: { nome: 'Arena Central' },
+      });
       expect(mockSolicitarCodigo).not.toHaveBeenCalled();
 
       const cookie = response.headers['set-cookie']?.[0] ?? '';
@@ -150,8 +160,13 @@ describe('auth.routes', () => {
       expect(response.body).toEqual({ erro: 'código inválido ou expirado' });
     });
 
-    it('deve autenticar, emitir JWT e definir cookie', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, unit_id: 1 }], rowCount: 1 });
+    it('deve autenticar, emitir JWT, definir cookie e devolver perfil', async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ id: 10, unit_id: 1 }], rowCount: 1 })
+        .mockResolvedValueOnce({
+          rows: [{ aluno_nome: 'João', unidade_nome: 'Arena Central' }],
+          rowCount: 1,
+        });
       mockVerificarCodigo.mockResolvedValue(true);
 
       const response = await request(createApp())
@@ -159,7 +174,12 @@ describe('auth.routes', () => {
         .send({ email: 'aluno@test.com', codigo: '123456' });
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'autenticado', token: 'jwt-token-gerado' });
+      expect(response.body).toEqual({
+        status: 'autenticado',
+        token: 'jwt-token-gerado',
+        aluno: { nome: 'João' },
+        unidade: { nome: 'Arena Central' },
+      });
       expect(mockSign).toHaveBeenCalledWith(
         { studentId: 10, unitId: 1 },
         'jwt-secreto-teste',
@@ -171,6 +191,45 @@ describe('auth.routes', () => {
       expect(cookie).toContain('HttpOnly');
       expect(cookie).toContain('Secure');
       expect(cookie).toContain('SameSite=Strict');
+    });
+  });
+
+  describe('GET /auth/me', () => {
+    it('deve retornar 401 sem token', async () => {
+      const response = await request(createApp()).get('/auth/me');
+
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({ erro: 'não autenticado' });
+    });
+
+    it('deve retornar perfil do aluno autenticado', async () => {
+      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
+      mockQuery.mockResolvedValue({
+        rows: [{ aluno_nome: 'João Silva', unidade_nome: 'Arena Central' }],
+        rowCount: 1,
+      });
+
+      const response = await request(createApp())
+        .get('/auth/me')
+        .set('Cookie', ['token=jwt-existente']);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        aluno: { nome: 'João Silva' },
+        unidade: { nome: 'Arena Central' },
+      });
+    });
+
+    it('deve retornar 404 quando aluno não existe', async () => {
+      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const response = await request(createApp())
+        .get('/auth/me')
+        .set('Cookie', ['token=jwt-existente']);
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ erro: 'aluno não encontrado' });
     });
   });
 });

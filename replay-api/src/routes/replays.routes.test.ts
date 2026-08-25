@@ -94,7 +94,7 @@ describe('replays.routes', () => {
         url: 'https://signed-url.test/arquivo',
         expira_em_segundos: 300,
       });
-      expect(mockGerarUrlDownload).toHaveBeenCalledWith('1/quadra/video.mp4', 300);
+      expect(mockGerarUrlDownload).toHaveBeenCalledWith('1/quadra/video.mp4', 300, 'replay-5.mp4');
     });
   });
 
