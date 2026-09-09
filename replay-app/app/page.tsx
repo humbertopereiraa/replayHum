@@ -23,12 +23,14 @@ import {
 } from 'lucide-react'
 import {
   ApiError,
-  clearToken,
   getDownloadUrl,
   getMe,
   getThumbnailUrl,
   getToken,
+  isSessionLocked,
   listReplays,
+  lockSession,
+  logout as encerrarSessao,
   requestOtp,
   setToken,
   verifyOtp,
@@ -154,6 +156,7 @@ function Login({ view, setView, onAuthenticated }: { view: 'email' | 'otp'; setV
   const [otpLoading, setOtpLoading] = useState(false)
   const [secondsLeft, setSecondsLeft] = useState(OTP_SECONDS)
   const [otpTick, setOtpTick] = useState(0)
+  const [hasSavedSession, setHasSavedSession] = useState(() => !!getToken())
 
   useEffect(() => {
     if (view !== 'otp') return
@@ -186,6 +189,12 @@ function Login({ view, setView, onAuthenticated }: { view: 'email' | 'otp'; setV
     } finally {
       setLoading(false)
     }
+  }
+
+  const switchAccount = async () => {
+    await encerrarSessao()
+    setHasSavedSession(false)
+    setError('')
   }
 
   const submitCode = async () => {
@@ -242,7 +251,16 @@ function Login({ view, setView, onAuthenticated }: { view: 'email' | 'otp'; setV
             <label htmlFor="email">E-mail</label>
             <input id="email" type="email" value={email} onChange={e => { setEmail(e.target.value); setError('') }} placeholder="voce@email.com" aria-invalid={!!error} />
             {error && <span className="field-error">{error}</span>}
-            <Button type="submit" disabled={loading}>{loading ? 'Enviando código...' : <>Enviar código <ArrowRight data-icon="inline-end" /></>}</Button>
+            <Button type="submit" disabled={loading}>
+              {loading
+                ? (hasSavedSession ? 'Entrando...' : 'Enviando código...')
+                : hasSavedSession
+                  ? <>Entrar <ArrowRight data-icon="inline-end" /></>
+                  : <>Enviar código <ArrowRight data-icon="inline-end" /></>}
+            </Button>
+            {hasSavedSession && (
+              <button className="back-link" type="button" onClick={() => void switchAccount()}>Usar outro e-mail</button>
+            )}
             <small>Não tem cadastro? Fale com a recepção da sua academia.</small>
             <button className="back-link" type="button" onClick={() => setView('landing')}><ArrowLeft data-icon="inline-start" /> Voltar para o início</button>
           </form>
@@ -286,7 +304,7 @@ function AppHeader({ onLogout, onHome, alunoNome, unidadeNome }: { onLogout: () 
   )
 }
 
-function Dashboard({ onDetail, onLogout, onHome, alunoNome, unidadeNome }: { onDetail: (r: Replay) => void; onLogout: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
+function Dashboard({ onDetail, onLogout, onUnauthorized, onHome, alunoNome, unidadeNome }: { onDetail: (r: Replay) => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
   const [court, setCourt] = useState('')
   const [date, setDate] = useState('')
   const [courts, setCourts] = useState<string[]>([])
@@ -316,7 +334,7 @@ function Dashboard({ onDetail, onLogout, onHome, alunoNome, unidadeNome }: { onD
       } catch (err) {
         if (cancelled) return
         if (err instanceof ApiError && err.status === 401) {
-          onLogout()
+          onUnauthorized()
           return
         }
         setError(errorMessage(err, 'Não foi possível carregar os replays.'))
@@ -327,7 +345,7 @@ function Dashboard({ onDetail, onLogout, onHome, alunoNome, unidadeNome }: { onD
 
     load()
     return () => { cancelled = true }
-  }, [court, date, onLogout])
+  }, [court, date, onUnauthorized])
 
   const clear = () => { setCourt(''); setDate('') }
 
@@ -338,7 +356,7 @@ function Dashboard({ onDetail, onLogout, onHome, alunoNome, unidadeNome }: { onD
       setShowToast(true)
       window.setTimeout(() => setShowToast(false), 2400)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) onLogout()
+      if (err instanceof ApiError && err.status === 401) onUnauthorized()
       else setError(errorMessage(err, 'Não foi possível iniciar o download.'))
     }
   }
@@ -470,7 +488,7 @@ function ReplayCard({ replay, onDetail, onDownload }: { replay: Replay; onDetail
   )
 }
 
-function Detail({ replay, onBack, onLogout, onHome, alunoNome, unidadeNome }: { replay: Replay; onBack: () => void; onLogout: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
+function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, unidadeNome }: { replay: Replay; onBack: () => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
   const [playing, setPlaying] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [thumbUrl, setThumbUrl] = useState<string | null>(null)
@@ -499,7 +517,7 @@ function Detail({ replay, onBack, onLogout, onHome, alunoNome, unidadeNome }: { 
       await loadVideo()
       setPlaying(true)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) onLogout()
+      if (err instanceof ApiError && err.status === 401) onUnauthorized()
       else setError(errorMessage(err, 'Não foi possível carregar o vídeo.'))
     } finally {
       setLoadingVideo(false)
@@ -512,7 +530,7 @@ function Detail({ replay, onBack, onLogout, onHome, alunoNome, unidadeNome }: { 
       const url = await loadVideo()
       triggerFileDownload(url, `replay-${replay.id}.mp4`)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) onLogout()
+      if (err instanceof ApiError && err.status === 401) onUnauthorized()
       else setError(errorMessage(err, 'Não foi possível iniciar o download.'))
     }
   }
@@ -571,15 +589,22 @@ export default function Page() {
   const [selected, setSelected] = useState<Replay | null>(null)
   const [perfil, setPerfil] = useState<PerfilResponse | null>(null)
 
-  const logout = useCallback(() => {
-    clearToken()
+  const sair = useCallback(() => {
+    lockSession()
+    setSelected(null)
+    setPerfil(null)
+    setView('landing')
+  }, [])
+
+  const invalidarSessao = useCallback(() => {
+    void encerrarSessao()
     setSelected(null)
     setPerfil(null)
     setView('landing')
   }, [])
 
   useEffect(() => {
-    if (!getToken()) return
+    if (!getToken() || isSessionLocked()) return
     setView('dashboard')
     let cancelled = false
     getMe()
@@ -588,10 +613,10 @@ export default function Page() {
       })
       .catch(err => {
         if (cancelled) return
-        if (err instanceof ApiError && err.status === 401) logout()
+        if (err instanceof ApiError && err.status === 401) invalidarSessao()
       })
     return () => { cancelled = true }
-  }, [logout])
+  }, [invalidarSessao])
 
   const onAuthenticated = (result: AuthSuccess) => {
     setToken(result.token)
@@ -609,7 +634,7 @@ export default function Page() {
 
   if (view === 'landing') return <Landing onLogin={() => setView('email')} />
   if (view === 'email' || view === 'otp') return <Login view={view} setView={setView} onAuthenticated={onAuthenticated} />
-  if (view === 'dashboard') return <Dashboard onDetail={openDetail} onLogout={logout} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
-  if (!selected) return <Dashboard onDetail={openDetail} onLogout={logout} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
-  return <Detail replay={selected} onBack={() => setView('dashboard')} onLogout={logout} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+  if (view === 'dashboard') return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+  if (!selected) return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+  return <Detail replay={selected} onBack={() => setView('dashboard')} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
 }

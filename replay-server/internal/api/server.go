@@ -3,10 +3,12 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"replay-server/internal/camera"
 	"replay-server/internal/config"
@@ -54,6 +56,11 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.autorizarReplay(r) {
+		http.Error(w, "não autorizado", http.StatusUnauthorized)
+		return
+	}
+
 	var req ReplayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -94,3 +101,11 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"processando"}`))
 }
 
+func (s *Server) autorizarReplay(r *http.Request) bool {
+	esperado := strings.TrimSpace(s.Cfg.ReplayToken)
+	recebido := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if esperado == "" || recebido == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(recebido), []byte(esperado)) == 1
+}

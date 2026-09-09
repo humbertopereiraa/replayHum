@@ -46,15 +46,16 @@ describe('auth.routes', () => {
       expect(response.body).toEqual({ erro: 'e-mail é obrigatório' });
     });
 
-    it('deve retornar 404 quando email não é encontrado', async () => {
+    it('deve retornar o mesmo 200 quando email não é encontrado', async () => {
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
         .post('/auth/request-otp')
         .send({ email: 'naoexiste@test.com' });
 
-      expect(response.status).toBe(404);
-      expect(response.body.erro).toContain('e-mail não encontrado');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: 'código enviado' });
+      expect(mockSolicitarCodigo).not.toHaveBeenCalled();
     });
 
     it('deve solicitar código e retornar 200 quando email existe e não há sessão', async () => {
@@ -137,15 +138,15 @@ describe('auth.routes', () => {
       expect(response.body).toEqual({ erro: 'e-mail e código são obrigatórios' });
     });
 
-    it('deve retornar 404 quando aluno não existe', async () => {
+    it('deve retornar 401 quando aluno não existe', async () => {
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
         .post('/auth/verify-otp')
         .send({ email: 'aluno@test.com', codigo: '123456' });
 
-      expect(response.status).toBe(404);
-      expect(response.body).toEqual({ erro: 'e-mail não encontrado' });
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({ erro: 'código inválido ou expirado' });
     });
 
     it('deve retornar 401 quando código é inválido', async () => {
@@ -194,6 +195,16 @@ describe('auth.routes', () => {
     });
   });
 
+  describe('POST /auth/logout', () => {
+    it('deve limpar o cookie mesmo sem sessão', async () => {
+      const response = await request(createApp()).post('/auth/logout');
+
+      expect(response.status).toBe(204);
+      const cookie = response.headers['set-cookie']?.[0] ?? '';
+      expect(cookie).toContain('token=');
+    });
+  });
+
   describe('GET /auth/me', () => {
     it('deve retornar 401 sem token', async () => {
       const response = await request(createApp()).get('/auth/me');
@@ -204,10 +215,15 @@ describe('auth.routes', () => {
 
     it('deve retornar perfil do aluno autenticado', async () => {
       mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
-      mockQuery.mockResolvedValue({
-        rows: [{ aluno_nome: 'João Silva', unidade_nome: 'Arena Central' }],
-        rowCount: 1,
-      });
+      mockQuery
+        .mockResolvedValueOnce({
+          rows: [{ id: 10, unit_id: 1, status: 'ativo' }],
+          rowCount: 1,
+        })
+        .mockResolvedValueOnce({
+          rows: [{ aluno_nome: 'João Silva', unidade_nome: 'Arena Central' }],
+          rowCount: 1,
+        });
 
       const response = await request(createApp())
         .get('/auth/me')
@@ -220,9 +236,29 @@ describe('auth.routes', () => {
       });
     });
 
-    it('deve retornar 404 quando aluno não existe', async () => {
+    it('deve retornar 401 quando o aluno está inativo', async () => {
       mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
-      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+      mockQuery.mockResolvedValue({
+        rows: [{ id: 10, unit_id: 1, status: 'inativo' }],
+        rowCount: 1,
+      });
+
+      const response = await request(createApp())
+        .get('/auth/me')
+        .set('Cookie', ['token=jwt-existente']);
+
+      expect(response.status).toBe(401);
+      expect(response.body).toEqual({ erro: 'token inválido ou expirado' });
+    });
+
+    it('deve retornar 404 quando o perfil não é encontrado', async () => {
+      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
+      mockQuery
+        .mockResolvedValueOnce({
+          rows: [{ id: 10, unit_id: 1, status: 'ativo' }],
+          rowCount: 1,
+        })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
         .get('/auth/me')

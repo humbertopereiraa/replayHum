@@ -1,6 +1,8 @@
 package uploader
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,42 +15,88 @@ func TestClienteEnviarSucesso(t *testing.T) {
 	job := jobDeTeste(t)
 
 	var (
-		gotAuth    string
-		gotQuadra  string
-		gotDuracao string
-		gotVideo   bool
-		gotThumb   bool
+		gotAuth       string
+		gotQuadra     string
+		gotDuracao    float64
+		gotVideoBytes float64
+		gotThumbBytes float64
+		gotVideoPUT   bool
+		gotThumbPUT   bool
+		gotVideoType  string
+		gotThumbType  string
+		gotConfirm    map[string]any
 	)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/upload" {
-			t.Errorf("requisição inesperada: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mux.HandleFunc("/upload/sign", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("sign: método inesperado %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-
 		gotAuth = r.Header.Get("Authorization")
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			t.Errorf("ParseMultipartForm: %v", err)
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("sign: JSON inválido: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		gotQuadra, _ = body["quadra"].(string)
+		gotDuracao, _ = body["duracao_seg"].(float64)
+		gotVideoBytes, _ = body["video_bytes"].(float64)
+		gotThumbBytes, _ = body["thumb_bytes"].(float64)
 
-		gotQuadra = r.FormValue("quadra")
-		gotDuracao = r.FormValue("duracao_seg")
-		if f, _, err := r.FormFile("video"); err == nil {
-			gotVideo = true
-			f.Close()
-		}
-		if f, _, err := r.FormFile("thumb"); err == nil {
-			gotThumb = true
-			f.Close()
-		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"video_key":          "1/Quadra 1/123.mp4",
+			"thumb_key":          "1/Quadra 1/123.jpg",
+			"video_url":          srv.URL + "/b2/video",
+			"thumb_url":          srv.URL + "/b2/thumb",
+			"expira_em_segundos": 900,
+		})
+	})
 
+	mux.HandleFunc("/b2/video", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("video PUT: método inesperado %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		gotVideoPUT = true
+		gotVideoType = r.Header.Get("Content-Type")
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/b2/thumb", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("thumb PUT: método inesperado %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		gotThumbPUT = true
+		gotThumbType = r.Header.Get("Content-Type")
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("/upload/confirm", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("confirm: método inesperado %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotConfirm); err != nil {
+			t.Errorf("confirm: JSON inválido: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"status":"recebido","replay_id":1}`))
-	}))
-	defer srv.Close()
+	})
 
 	cliente := NovoCliente(srv.URL, "chave-teste")
 	if err := cliente.Enviar(job); err != nil {
@@ -61,14 +109,32 @@ func TestClienteEnviarSucesso(t *testing.T) {
 	if gotQuadra != "Quadra 1" {
 		t.Errorf("quadra = %q, want Quadra 1", gotQuadra)
 	}
-	if gotDuracao != "30" {
-		t.Errorf("duracao_seg = %q, want 30", gotDuracao)
+	if gotDuracao != 30 {
+		t.Errorf("duracao_seg = %v, want 30", gotDuracao)
 	}
-	if !gotVideo {
-		t.Error("campo video ausente")
+	if gotVideoBytes != 5 {
+		t.Errorf("video_bytes = %v, want 5", gotVideoBytes)
 	}
-	if !gotThumb {
-		t.Error("campo thumb ausente")
+	if gotThumbBytes != 5 {
+		t.Errorf("thumb_bytes = %v, want 5", gotThumbBytes)
+	}
+	if !gotVideoPUT {
+		t.Error("PUT do vídeo ausente")
+	}
+	if !gotThumbPUT {
+		t.Error("PUT da thumbnail ausente")
+	}
+	if gotVideoType != "video/mp4" {
+		t.Errorf("Content-Type do vídeo = %q, want video/mp4", gotVideoType)
+	}
+	if gotThumbType != "image/jpeg" {
+		t.Errorf("Content-Type da thumb = %q, want image/jpeg", gotThumbType)
+	}
+	if gotConfirm["video_key"] != "1/Quadra 1/123.mp4" {
+		t.Errorf("confirm video_key = %v", gotConfirm["video_key"])
+	}
+	if gotConfirm["thumb_key"] != "1/Quadra 1/123.jpg" {
+		t.Errorf("confirm thumb_key = %v", gotConfirm["thumb_key"])
 	}
 }
 
@@ -101,6 +167,39 @@ func TestClienteEnviarArquivoAusente(t *testing.T) {
 	err := NovoCliente("http://localhost:3000", "chave").Enviar(job)
 	if err == nil {
 		t.Fatal("esperava erro ao abrir arquivo inexistente")
+	}
+}
+
+func TestClienteEnviarConfirmIdempotente(t *testing.T) {
+	job := jobDeTeste(t)
+
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mux.HandleFunc("/upload/sign", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"video_key":          "1/Quadra 1/123.mp4",
+			"thumb_key":          "1/Quadra 1/123.jpg",
+			"video_url":          srv.URL + "/b2/video",
+			"thumb_url":          srv.URL + "/b2/thumb",
+			"expira_em_segundos": 900,
+		})
+	})
+	mux.HandleFunc("/b2/video", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/b2/thumb", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/upload/confirm", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"recebido","replay_id":7}`))
+	})
+
+	if err := NovoCliente(srv.URL, "chave-teste").Enviar(job); err != nil {
+		t.Fatalf("Enviar com confirm 200: %v", err)
 	}
 }
 

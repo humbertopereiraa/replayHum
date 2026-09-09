@@ -26,6 +26,7 @@ type Config struct {
 	UploadWorkers  int      `json:"upload_workers"`
 	APIURL         string   `json:"api_url"`
 	APIKey         string   `json:"api_key"`
+	ReplayToken    string   `json:"replay_token"`
 	Cameras        []Camera `json:"cameras"`
 }
 
@@ -54,6 +55,9 @@ func (c *Config) validar() error {
 	}
 	if strings.TrimSpace(c.APIKey) == "" {
 		return fmt.Errorf("api_key é obrigatório")
+	}
+	if strings.TrimSpace(c.ReplayToken) == "" {
+		return fmt.Errorf("replay_token é obrigatório")
 	}
 	return nil
 }

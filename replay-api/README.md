@@ -8,21 +8,25 @@ API mínima em Node.js/Express para o sistema de replay esportivo.
 replay-api/
 ├── .env.example              # copie para .env e preencha
 ├── migrations/
-│   └── 001_init.sql          # rode isso no seu Postgres uma vez
+│   ├── 001_init.sql                    # rode isso no seu Postgres uma vez
+│   ├── 002_unique_b2_key_video.sql     # unique em b2_key_video (confirm idempotente)
+│   └── 003_import_api_key.sql          # hash da key de importação de alunos
 ├── src/
 │   ├── config/
-│   │   └── db.js             # conexão com o Postgres
+│   │   └── db.ts             # conexão com o Postgres
 │   ├── middleware/
-│   │   └── auth.js           # autenticarAluno (JWT) + autenticarServidorLocal (API Key)
+│   │   ├── auth.ts           # JWT do aluno + API Key de upload + key de import
+│   │   └── rate-limit.ts     # tetos por IP / e-mail / aluno
 │   ├── services/
-│   │   ├── crypto.service.js # blind index + criptografia do e-mail
-│   │   ├── otp.service.js    # geração/verificação do código OTP
-│   │   └── b2.service.js     # upload e presigned URL no Backblaze B2
+│   │   ├── crypto.service.ts # blind index + criptografia do e-mail
+│   │   ├── otp.service.ts    # geração/verificação do código OTP
+│   │   └── b2.service.ts     # URLs assinadas (PUT/GET) e HeadObject no B2
 │   ├── routes/
-│   │   ├── auth.routes.js      # POST /auth/request-otp, /auth/verify-otp
-│   │   ├── upload.routes.js    # POST /upload (usado pelo servidor local Go)
-│   │   └── replays.routes.js   # GET /replays, GET /replays/:id/download
-│   └── server.js             # junta tudo
+│   │   ├── auth.routes.ts      # OTP, /me, /logout
+│   │   ├── upload.routes.ts    # POST /upload/sign e /upload/confirm (servidor local Go)
+│   │   ├── students.routes.ts  # POST /students/import
+│   │   └── replays.routes.ts   # GET /replays, download e thumbnail
+│   └── server.ts             # junta tudo
 └── package.json
 ```
 
@@ -31,7 +35,8 @@ replay-api/
 - **Supabase** (supabase.com) — Postgres gerenciado, free tier generoso
 - **Neon** (neon.tech) — Postgres serverless, free tier bom para começar
 
-Depois de criar o banco, rode o arquivo `migrations/001_init.sql`
+Depois de criar o banco, rode os arquivos em `migrations/`
+(`001_init.sql`, `002_unique_b2_key_video.sql` e `003_import_api_key.sql`)
 direto no editor SQL do painel (Supabase e Neon têm um embutido).
 
 ## Configuração
@@ -45,6 +50,16 @@ direto no editor SQL do painel (Supabase e Neon têm um embutido).
    Rode isso 2 vezes: uma para `JWT_SECRET`/`EMAIL_HASH_KEY` (podem
    ser qualquer string longa), e OBRIGATORIAMENTE para
    `EMAIL_ENCRYPTION_KEY` (precisa ser exatamente 32 bytes em hex).
+3. SSL do Postgres: com certificado válido do provedor, use
+   `DATABASE_SSL_REJECT_UNAUTHORIZED=true`. Deixe `false` só se o
+   pooler falhar com erro de certificado.
+
+## Bucket B2
+
+O bucket deve ser **privado**. A API nunca entrega o MP4: ela devolve
+uma URL assinada (válida por 5 minutos). Quem tiver o link baixa o
+arquivo nesse intervalo, sem JWT. Replay da unidade é visível para
+todos os alunos da mesma academia (regra de produto).
 
 ## Rodando localmente (desenvolvimento, com reload automático)
 
@@ -69,33 +84,43 @@ npm run typecheck
 ## Cadastro de unidade (ainda manual, para o MVP)
 
 Como ainda não existe painel administrativo, cadastre a primeira
-unidade e sua API Key direto no banco:
+unidade e as duas API Keys direto no banco. São chaves **diferentes**:
 
-```sql
--- Gere uma API Key aleatória (ex: com o comando node acima) e
--- calcule o hash SHA-256 dela antes de inserir:
--- node -e "console.log(require('crypto').createHash('sha256').update('SUA_API_KEY_AQUI').digest('hex'))"
+- `api_key_hash` — só o servidor local Go (upload)
+- `import_api_key_hash` — só `POST /students/import`
 
-INSERT INTO units (nome, api_key_hash) VALUES ('Arena Sports', 'hash_gerado_aqui');
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log(require('crypto').createHash('sha256').update('COLE_A_KEY_AQUI').digest('hex'))"
 ```
 
-A API Key **em texto puro** (não o hash) é o que você coloca no
-`config.json` do servidor local Go, no header `Authorization: Bearer <api_key>`.
+```sql
+INSERT INTO units (nome, api_key_hash, import_api_key_hash)
+VALUES ('Arena Sports', 'hash_da_key_de_upload', 'hash_da_key_de_import');
+```
 
-## Cadastro de alunos (via CSV, como no plano original)
+A key de upload **em texto puro** vai no `config.json` do Go
+(`Authorization: Bearer <api_key>`). A de importação não entra no Mini PC.
 
-Ainda não implementado neste esqueleto mínimo — é o próximo passo
-natural: uma rota `POST /admin/students/import` que lê um CSV,
-calcula `email_hash` e `email_encrypted` para cada linha, e insere
-em lote na tabela `students`.
+Sem `import_api_key_hash`, o import responde 401.
+
+## Cadastro de alunos
+
+`POST /students/import` com `{ "alunos": [{ "nome", "email" }, ...] }`
+(máx. 500 por request), autenticado com a key de importação.
+Quem não vier no lote é desativado.
 
 ## Endpoints disponíveis
 
 | Método | Rota | Quem chama | Autenticação |
 |---|---|---|---|
-| POST | `/auth/request-otp` | Site (aluno) | Nenhuma |
-| POST | `/auth/verify-otp` | Site (aluno) | Nenhuma |
-| POST | `/upload` | Servidor local (Go) | API Key |
-| GET | `/replays` | Site (aluno) | JWT (cookie) |
-| GET | `/replays/:id/download` | Site (aluno) | JWT (cookie) |
-| GET | `/replays/:id/thumbnail` | Site (aluno) | JWT (cookie) |
+| POST | `/auth/request-otp` | Site (aluno) | Nenhuma (rate limit) |
+| POST | `/auth/verify-otp` | Site (aluno) | Nenhuma (rate limit) |
+| POST | `/auth/logout` | Site (aluno) | Cookie opcional (sempre limpa) |
+| GET | `/auth/me` | Site (aluno) | JWT |
+| POST | `/upload/sign` | Servidor local (Go) | API Key de upload |
+| POST | `/upload/confirm` | Servidor local (Go) | API Key de upload |
+| POST | `/students/import` | Operação da unidade | API Key de importação |
+| GET | `/replays` | Site (aluno) | JWT |
+| GET | `/replays/:id/download` | Site (aluno) | JWT (30/min por aluno) |
+| GET | `/replays/:id/thumbnail` | Site (aluno) | JWT |

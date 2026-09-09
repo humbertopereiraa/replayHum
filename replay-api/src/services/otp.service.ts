@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Resend } from 'resend';
 import pool from '../config/db';
-import { hashSimples } from './crypto.service';
+import { hashOtp, hashesIguais } from './crypto.service';
 import type { OtpCode } from '../types';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -14,6 +14,15 @@ const LOGO_CONTENT_ID = 'logo-replayhum';
 
 function gerarCodigo(): string {
   return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+function escapeHtml(texto: string): string {
+  return texto
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function renderCodigoHtml(codigo: string): string {
@@ -29,7 +38,7 @@ function renderCodigoHtml(codigo: string): string {
 function montarHtmlEmail(nomeAluno: string, codigo: string): string {
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf8');
   return template
-    .replaceAll('{{NOME}}', nomeAluno)
+    .replaceAll('{{NOME}}', escapeHtml(nomeAluno))
     .replaceAll('{{CODIGO_HTML}}', renderCodigoHtml(codigo));
 }
 
@@ -42,7 +51,7 @@ export async function solicitarCodigo(
   nomeAluno: string
 ): Promise<void> {
   const codigo = gerarCodigo();
-  const codeHash = hashSimples(codigo);
+  const codeHash = hashOtp(codigo);
   const expiresAt = new Date(Date.now() + VALIDADE_MINUTOS * 60 * 1000);
 
   await pool.query(
@@ -83,8 +92,7 @@ export async function verificarCodigo(studentId: number, codigoDigitado: string)
   if (new Date() > new Date(registro.expires_at)) return false;
   if (registro.tentativas >= MAX_TENTATIVAS) return false;
 
-  const codeHash = hashSimples(codigoDigitado);
-  const acertou = codeHash === registro.code_hash;
+  const acertou = hashesIguais(hashOtp(codigoDigitado), registro.code_hash);
 
   if (acertou) {
     await pool.query(`UPDATE otp_codes SET usado = true WHERE id = $1`, [registro.id]);

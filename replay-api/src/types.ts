@@ -4,6 +4,7 @@ export interface Unit {
   id: number;
   nome: string;
   api_key_hash: string;
+  import_api_key_hash: string | null;
   created_at: Date;
 }
 

@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'replay_token'
+const LOCK_KEY = 'replay_locked'
 
 export class ApiError extends Error {
   constructor(
@@ -17,10 +18,24 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token)
+  unlockSession()
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+}
+
+export function isSessionLocked(): boolean {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem(LOCK_KEY) === '1'
+}
+
+export function lockSession(): void {
+  localStorage.setItem(LOCK_KEY, '1')
+}
+
+export function unlockSession(): void {
+  localStorage.removeItem(LOCK_KEY)
 }
 
 function apiBase(): string {
@@ -111,4 +126,23 @@ export function getDownloadUrl(id: number): Promise<{ url: string; expira_em_seg
 
 export function getThumbnailUrl(id: number): Promise<{ url: string }> {
   return api(`/replays/${id}/thumbnail`)
+}
+
+export async function logout(): Promise<void> {
+  try {
+    const headers = new Headers()
+    const token = getToken()
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+    await fetch(`${apiBase()}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+    })
+  } catch {
+    // o cookie local some mesmo se a API estiver fora
+  }
+  clearToken()
+  unlockSession()
 }

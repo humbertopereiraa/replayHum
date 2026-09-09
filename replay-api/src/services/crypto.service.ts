@@ -37,3 +37,17 @@ export function decryptEmail(valorCifrado: string): string {
 export function hashSimples(valor: string): string {
   return crypto.createHash('sha256').update(valor).digest('hex');
 }
+
+export function hashOtp(codigo: string): string {
+  const chave = process.env.EMAIL_HASH_KEY!;
+  return crypto.createHmac('sha256', chave).update(codigo).digest('hex');
+}
+
+export function hashesIguais(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}

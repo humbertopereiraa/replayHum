@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
 import { autenticarAluno } from '../middleware/auth';
+import { limiteDownload, limiteThumbnail } from '../middleware/rate-limit';
 import { gerarUrlDownload } from '../services/b2.service';
 import type { Replay } from '../types';
 
@@ -28,7 +29,7 @@ router.get('/', autenticarAluno, async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-router.get('/:id/download', autenticarAluno, async (req: Request, res: Response) => {
+router.get('/:id/download', autenticarAluno, limiteDownload, async (req: Request, res: Response) => {
   const { rows } = await pool.query<Replay>(
     `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
     [req.params.id, req.unitId]
@@ -44,20 +45,25 @@ router.get('/:id/download', autenticarAluno, async (req: Request, res: Response)
   res.json({ url, expira_em_segundos: 300 });
 });
 
-router.get('/:id/thumbnail', autenticarAluno, async (req: Request, res: Response) => {
-  const { rows } = await pool.query<Replay>(
-    `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
-    [req.params.id, req.unitId]
-  );
+router.get(
+  '/:id/thumbnail',
+  autenticarAluno,
+  limiteThumbnail,
+  async (req: Request, res: Response) => {
+    const { rows } = await pool.query<Replay>(
+      `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
+      [req.params.id, req.unitId]
+    );
 
-  const replay = rows[0];
-  if (!replay) {
-    res.status(404).json({ erro: 'replay não encontrado' });
-    return;
+    const replay = rows[0];
+    if (!replay) {
+      res.status(404).json({ erro: 'replay não encontrado' });
+      return;
+    }
+
+    const url = await gerarUrlDownload(replay.b2_key_thumb, 300);
+    res.json({ url });
   }
-
-  const url = await gerarUrlDownload(replay.b2_key_thumb, 300);
-  res.json({ url });
-});
+);
 
 export default router;

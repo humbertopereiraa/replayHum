@@ -1,4 +1,4 @@
-import { decryptEmail, encryptEmail, hashEmail, hashSimples } from './crypto.service';
+import { decryptEmail, encryptEmail, hashEmail, hashOtp, hashesIguais, hashSimples } from './crypto.service';
 
 describe('crypto.service', () => {
   describe('hashEmail', () => {
@@ -55,6 +55,27 @@ describe('crypto.service', () => {
       const hash = hashSimples('valor');
 
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+  });
+
+  describe('hashOtp', () => {
+    it('deve ser determinístico', () => {
+      expect(hashOtp('123456')).toBe(hashOtp('123456'));
+    });
+
+    it('não deve coincidir com SHA-256 puro', () => {
+      expect(hashOtp('123456')).not.toBe(hashSimples('123456'));
+    });
+  });
+
+  describe('hashesIguais', () => {
+    it('deve aceitar hashes iguais', () => {
+      expect(hashesIguais('abcd', 'abcd')).toBe(true);
+    });
+
+    it('deve rejeitar hashes diferentes ou de tamanho distinto', () => {
+      expect(hashesIguais('abcd', 'abce')).toBe(false);
+      expect(hashesIguais('abc', 'abcd')).toBe(false);
     });
   });
 });

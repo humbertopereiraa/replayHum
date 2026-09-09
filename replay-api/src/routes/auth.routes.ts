@@ -6,8 +6,14 @@ import {
   aplicarCookieToken,
   emitirToken,
   lerTokenValido,
+  limparCookieToken,
 } from '../services/auth-token.service';
 import { autenticarAluno } from '../middleware/auth';
+import {
+  limiteOtpPorEmail,
+  limiteOtpPorIp,
+  limiteVerifyOtpPorIp,
+} from '../middleware/rate-limit';
 import type { Student } from '../types';
 
 const router = express.Router();
@@ -35,44 +41,49 @@ async function buscarPerfilAluno(studentId: number): Promise<PerfilAluno | null>
   };
 }
 
-router.post('/request-otp', async (req: Request, res: Response) => {
-  const { email } = req.body as { email?: string };
-  if (!email) {
-    res.status(400).json({ erro: 'e-mail é obrigatório' });
-    return;
+router.post(
+  '/request-otp',
+  limiteOtpPorIp,
+  limiteOtpPorEmail,
+  async (req: Request, res: Response) => {
+    const { email } = req.body as { email?: string };
+    if (!email) {
+      res.status(400).json({ erro: 'e-mail é obrigatório' });
+      return;
+    }
+
+    const emailHash = hashEmail(email);
+
+    const { rows } = await pool.query<Pick<Student, 'id' | 'nome'>>(
+      `SELECT id, nome FROM students WHERE email_hash = $1 AND status = 'ativo'`,
+      [emailHash]
+    );
+
+    if (rows.length === 0) {
+      res.json({ status: 'código enviado' });
+      return;
+    }
+
+    const aluno = rows[0];
+    const sessao = lerTokenValido(req);
+
+    if (sessao && sessao.payload.studentId === aluno.id) {
+      aplicarCookieToken(res, sessao.token);
+      const perfil = await buscarPerfilAluno(aluno.id);
+      res.json({
+        status: 'autenticado',
+        token: sessao.token,
+        ...(perfil ?? { aluno: { nome: aluno.nome }, unidade: { nome: '' } }),
+      });
+      return;
+    }
+
+    await solicitarCodigo(aluno.id, email, aluno.nome);
+    res.json({ status: 'código enviado' });
   }
+);
 
-  const emailHash = hashEmail(email);
-
-  const { rows } = await pool.query<Pick<Student, 'id' | 'nome'>>(
-    `SELECT id, nome FROM students WHERE email_hash = $1 AND status = 'ativo'`,
-    [emailHash]
-  );
-
-  if (rows.length === 0) {
-    res.status(404).json({ erro: 'e-mail não encontrado. Fale com a administração da sua academia.' });
-    return;
-  }
-
-  const aluno = rows[0];
-  const sessao = lerTokenValido(req);
-
-  if (sessao && sessao.payload.studentId === aluno.id) {
-    aplicarCookieToken(res, sessao.token);
-    const perfil = await buscarPerfilAluno(aluno.id);
-    res.json({
-      status: 'autenticado',
-      token: sessao.token,
-      ...(perfil ?? { aluno: { nome: aluno.nome }, unidade: { nome: '' } }),
-    });
-    return;
-  }
-
-  await solicitarCodigo(aluno.id, email, aluno.nome);
-  res.json({ status: 'código enviado' });
-});
-
-router.post('/verify-otp', async (req: Request, res: Response) => {
+router.post('/verify-otp', limiteVerifyOtpPorIp, async (req: Request, res: Response) => {
   const { email, codigo } = req.body as { email?: string; codigo?: string };
   if (!email || !codigo) {
     res.status(400).json({ erro: 'e-mail e código são obrigatórios' });
@@ -88,7 +99,7 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
 
   const aluno = rows[0];
   if (!aluno) {
-    res.status(404).json({ erro: 'e-mail não encontrado' });
+    res.status(401).json({ erro: 'código inválido ou expirado' });
     return;
   }
 
@@ -107,6 +118,11 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
     token,
     ...(perfil ?? { aluno: { nome: '' }, unidade: { nome: '' } }),
   });
+});
+
+router.post('/logout', (_req: Request, res: Response) => {
+  limparCookieToken(res);
+  res.status(204).send();
 });
 
 router.get('/me', autenticarAluno, async (req: Request, res: Response) => {

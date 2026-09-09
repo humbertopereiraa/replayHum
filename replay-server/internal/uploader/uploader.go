@@ -1,6 +1,3 @@
-// Package uploader consome a fila de replays prontos e envia cada um
-// para a replay-api (POST /upload). Arquivos locais só são apagados
-// depois de a API confirmar o recebimento com HTTP 201.
 package uploader
 
 import (
@@ -8,13 +5,24 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 )
 
-const tamanhoFila = 100
+const (
+	tamanhoFila   = 100
+	maxTentativas = 5
+)
+
+var esperasRetry = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+	40 * time.Second,
+}
 
 // Servico é a fachada da fila de upload: o watcher enfileira Jobs e
-// os workers enviam para a API. Controla duplicatas (em andamento ou
-// já enviados com resíduo no disco) para não gravar o mesmo replay duas vezes.
+// os workers pedem URL assinada, enviam ao B2 e confirmam na API.
+// Arquivos locais só são apagados depois do confirm (HTTP 201 ou 200).
 type Servico struct {
 	cliente     *Cliente
 	fila        chan Job
@@ -34,7 +42,7 @@ func NovoServico(apiURL, apiKey string) *Servico {
 }
 
 // TentarEnfileirar coloca o job na fila se ele ainda não está em
-// processamento nem foi enviado com sucesso (com arquivos residuals).
+// processamento nem foi enviado com sucesso (com arquivos residuais).
 // Retorna false quando ignora o job ou a fila está cheia.
 func (s *Servico) TentarEnfileirar(job Job) bool {
 	s.mu.Lock()
@@ -74,8 +82,20 @@ func (s *Servico) worker(id int) {
 func (s *Servico) processar(id int, job Job) {
 	log.Printf("[uploader %d] enviando: %s", id, job.VideoPath)
 
-	if err := s.cliente.Enviar(job); err != nil {
-		log.Printf("[uploader %d] falha ao enviar %s: %v", id, job.VideoPath, err)
+	var err error
+	for tentativa := 1; tentativa <= maxTentativas; tentativa++ {
+		err = s.cliente.Enviar(job)
+		if err == nil {
+			break
+		}
+		log.Printf("[uploader %d] falha ao enviar %s (tentativa %d/%d): %v", id, job.VideoPath, tentativa, maxTentativas, err)
+		if tentativa < maxTentativas {
+			time.Sleep(esperasRetry[tentativa-1])
+		}
+	}
+
+	if err != nil {
+		log.Printf("[uploader %d] desistindo de %s após %d tentativas; arquivo permanece no disco", id, job.VideoPath, maxTentativas)
 		s.liberar(job.VideoPath)
 		return
 	}

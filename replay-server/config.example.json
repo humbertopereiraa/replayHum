@@ -8,6 +8,7 @@
     "upload_workers": 2,
     "api_url": "http://localhost:3000",
     "api_key": "minha-api-key-secreta",
+    "replay_token": "token-da-botoeira",
     "cameras": [
       {
         "id": 1,

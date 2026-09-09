@@ -1,22 +1,28 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
-import { autenticarServidorLocal } from '../middleware/auth';
+import { autenticarImportacao } from '../middleware/auth';
 import { hashEmail, encryptEmail } from '../services/crypto.service';
 
 const router = express.Router();
 
 const REGEX_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_ALUNOS_POR_LOTE = 500;
 
 interface AlunoInput {
   nome: string;
   email: string;
 }
 
-router.post('/import', autenticarServidorLocal, async (req: Request, res: Response) => {
+router.post('/import', autenticarImportacao, async (req: Request, res: Response) => {
   const { alunos } = req.body as { alunos?: AlunoInput[] };
 
   if (!Array.isArray(alunos) || alunos.length === 0) {
     res.status(400).json({ erro: 'envie um array "alunos" com pelo menos 1 item' });
+    return;
+  }
+
+  if (alunos.length > MAX_ALUNOS_POR_LOTE) {
+    res.status(400).json({ erro: `máximo de ${MAX_ALUNOS_POR_LOTE} alunos por importação` });
     return;
   }
 

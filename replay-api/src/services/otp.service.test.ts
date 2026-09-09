@@ -15,7 +15,7 @@ jest.mock('../config/db', () => ({
 
 import { Resend } from 'resend';
 import pool from '../config/db';
-import { hashSimples } from './crypto.service';
+import { hashOtp } from './crypto.service';
 import { solicitarCodigo, verificarCodigo } from './otp.service';
 import { createOtpCode } from '../test/helpers/fixtures';
 
@@ -77,6 +77,17 @@ describe('otp.service', () => {
       expect(payload.html).not.toContain('{{CODIGO_HTML}}');
       expect(payload.text).toContain(codigo);
     });
+
+    it('deve escapar HTML no nome do aluno', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 1 });
+
+      await solicitarCodigo(10, 'aluno@test.com', '<img src=x onerror=alert(1)>');
+
+      const payload = mockSend.mock.calls[0][0] as { html: string; text: string };
+      expect(payload.html).not.toContain('<img src=x');
+      expect(payload.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(payload.text).toContain('<img src=x onerror=alert(1)>');
+    });
   });
 
   describe('verificarCodigo', () => {
@@ -110,7 +121,7 @@ describe('otp.service', () => {
 
     it('deve retornar true e marcar como usado quando o hash confere', async () => {
       const codigo = '654321';
-      const registro = createOtpCode({ code_hash: hashSimples(codigo) });
+      const registro = createOtpCode({ code_hash: hashOtp(codigo) });
       mockQuery
         .mockResolvedValueOnce({ rows: [registro], rowCount: 1 })
         .mockResolvedValueOnce({ rows: [], rowCount: 1 });
@@ -125,7 +136,7 @@ describe('otp.service', () => {
     });
 
     it('deve retornar false e incrementar tentativas quando o hash não confere', async () => {
-      const registro = createOtpCode({ code_hash: hashSimples('111111') });
+      const registro = createOtpCode({ code_hash: hashOtp('111111') });
       mockQuery
         .mockResolvedValueOnce({ rows: [registro], rowCount: 1 })
         .mockResolvedValueOnce({ rows: [], rowCount: 1 });

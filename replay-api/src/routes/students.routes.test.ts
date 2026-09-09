@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 
 jest.mock('../middleware/auth', () => ({
-  autenticarServidorLocal: (req: Request, _res: Response, next: NextFunction) => {
+  autenticarImportacao: (req: Request, _res: Response, next: NextFunction) => {
     req.unitId = 1;
     next();
   },
@@ -105,5 +105,18 @@ describe('students.routes', () => {
     expect(response.body).toEqual({ erro: 'falha ao importar alunos' });
     expect(mockClientQuery).toHaveBeenCalledWith('ROLLBACK');
     expect(mockClientRelease).toHaveBeenCalled();
+  });
+
+  it('deve retornar 400 quando o lote passa de 500 alunos', async () => {
+    const alunos = Array.from({ length: 501 }, (_, i) => ({
+      nome: `Aluno ${i}`,
+      email: `aluno${i}@test.com`,
+    }));
+
+    const response = await request(createApp()).post('/students/import').send({ alunos });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ erro: 'máximo de 500 alunos por importação' });
+    expect(mockConnect).not.toHaveBeenCalled();
   });
 });

@@ -39,21 +39,3 @@ export function createReplay(overrides: Partial<Replay> = {}): Replay {
     ...overrides,
   };
 }
-
-export function createMulterFile(
-  overrides: Partial<Express.Multer.File> = {}
-): Express.Multer.File {
-  return {
-    fieldname: 'video',
-    originalname: 'video.mp4',
-    encoding: '7bit',
-    mimetype: 'video/mp4',
-    size: 1024,
-    buffer: Buffer.from('conteudo-teste'),
-    stream: null as unknown as Express.Multer.File['stream'],
-    destination: '',
-    filename: '',
-    path: '',
-    ...overrides,
-  };
-}
