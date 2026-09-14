@@ -52,7 +52,7 @@ type Replay = {
 }
 
 const OTP_SECONDS = 5 * 60
-const DAY_MS = 24 * 60 * 60 * 1000
+const RETENTION_MS = 48 * 60 * 60 * 1000
 
 function isoDate(offsetDays = 0): string {
   const d = new Date()
@@ -94,7 +94,7 @@ function mapReplay(row: ReplayRow): Replay {
     time: created.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     day,
     duration: formatDuration(row.duracao_seg),
-    expired: now.getTime() - created.getTime() > DAY_MS,
+    expired: now.getTime() - created.getTime() > RETENTION_MS,
   }
 }
 
@@ -394,7 +394,7 @@ function Dashboard({ onDetail, onLogout, onUnauthorized, onHome, alunoNome, unid
               <ChevronDown />
             </label>
           </div>
-          <span className="availability"><Clock3 /> Disponíveis por até 24 horas</span>
+          <span className="availability"><Clock3 /> Disponíveis por até 48 horas</span>
         </div>
         <div className="mobile-filters">
           <label>Data

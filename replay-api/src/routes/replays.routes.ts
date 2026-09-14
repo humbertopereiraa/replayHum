@@ -7,11 +7,14 @@ import type { Replay } from '../types';
 
 const router = express.Router();
 
+const RETENCAO_HORAS = 48;
+
 router.get('/', autenticarAluno, async (req: Request, res: Response) => {
   const { quadra, data } = req.query as { quadra?: string; data?: string };
 
   let sql = `SELECT id, quadra, duracao_seg, created_at
-             FROM replays WHERE unit_id = $1`;
+             FROM replays WHERE unit_id = $1
+             AND created_at > now() - interval '${RETENCAO_HORAS} hours'`;
   const params: unknown[] = [req.unitId];
 
   if (quadra) {

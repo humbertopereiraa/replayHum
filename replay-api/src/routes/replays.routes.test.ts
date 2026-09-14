@@ -56,7 +56,7 @@ describe('replays.routes', () => {
         duracao_seg: 120,
       });
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('WHERE unit_id = $1'),
+        expect.stringMatching(/WHERE unit_id = \$1\s+AND created_at > now\(\) - interval '48 hours'/),
         [1]
       );
     });

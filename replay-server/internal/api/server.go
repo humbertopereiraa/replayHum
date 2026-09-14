@@ -5,10 +5,14 @@ package api
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"replay-server/internal/camera"
 	"replay-server/internal/config"
@@ -24,8 +28,10 @@ type ReplayRequest struct {
 // Server mantém referência aos workers de câmera para poder acessar
 // o buffer de segmentos de cada uma na hora de gerar o replay.
 type Server struct {
-	Workers map[int]*camera.Worker // indexado pelo ID da câmera/quadra
-	Cfg     *config.Config
+	Workers      map[int]*camera.Worker // indexado pelo ID da câmera/quadra
+	Cfg          *config.Config
+	LogSinalPath string // vazio = botoeira_ultimo_sinal.log no CWD
+	logSinalMu   sync.Mutex
 }
 
 // NovoServer cria o servidor HTTP com acesso aos workers de câmera.
@@ -67,18 +73,33 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worker, ok := s.Workers[req.QuadraID]
-	if !ok {
+	if _, ok := s.Workers[req.QuadraID]; !ok {
 		http.Error(w, "quadra/câmera não encontrada", http.StatusNotFound)
 		return
 	}
 
+	origem := "replay"
+	if strings.EqualFold(strings.TrimSpace(req.Acao), "heartbeat") {
+		origem = "heartbeat"
+	}
+	s.registrarSinal(req.QuadraID, origem)
+
+	if origem == "heartbeat" {
+		log.Printf("[api] heartbeat da quadra %d", req.QuadraID)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		return
+	}
+
+	worker := s.Workers[req.QuadraID]
 	log.Printf("[api] replay solicitado para quadra %d", req.QuadraID)
 
-	// Processa a geração do replay numa goroutine separada — assim a
-	// resposta HTTP volta rápido pro ESP32, sem ele ficar esperando o
-	// FFmpeg terminar de concatenar (o que pode levar alguns segundos).
+	// Processa a geração numa goroutine — a resposta HTTP volta rápido
+	// pro ESP32. A espera do segmento (até ~8s) e o FFmpeg ficam aqui.
 	go func() {
+		timeout := time.Duration(s.Cfg.SegmentSeconds+2) * time.Second
+		worker.EsperarSegmentoFechar(timeout)
+
 		segmentosNecessarios := replay.SegmentosNecessarios(s.Cfg.ReplaySeconds, s.Cfg.SegmentSeconds)
 		segmentos, err := worker.UltimosSegmentos(segmentosNecessarios)
 		if err != nil {
@@ -86,7 +107,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		videoPath, thumbPath, err := replay.Gerar(segmentos, s.Cfg.ReplayPath, req.QuadraID)
+		videoPath, thumbPath, err := replay.Gerar(segmentos, s.Cfg.ReplayPath, req.QuadraID, s.Cfg.ReplaySeconds)
 		if err != nil {
 			log.Printf("[api] erro ao gerar replay da quadra %d: %v", req.QuadraID, err)
 			return
@@ -99,6 +120,73 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"processando"}`))
+}
+
+func (s *Server) caminhoLogSinal() string {
+	if strings.TrimSpace(s.LogSinalPath) != "" {
+		return s.LogSinalPath
+	}
+	return "botoeira_ultimo_sinal.log"
+}
+
+func (s *Server) registrarSinal(quadraID int, origem string) {
+	s.logSinalMu.Lock()
+	defer s.logSinalMu.Unlock()
+
+	caminho := s.caminhoLogSinal()
+	linhasPorQuadra := map[int]string{}
+	ordem := make([]int, 0)
+
+	if data, err := os.ReadFile(caminho); err == nil {
+		for _, linha := range strings.Split(string(data), "\n") {
+			linha = strings.TrimSpace(linha)
+			if linha == "" {
+				continue
+			}
+			id, ok := parseQuadraDaLinha(linha)
+			if !ok {
+				continue
+			}
+			if _, existe := linhasPorQuadra[id]; !existe {
+				ordem = append(ordem, id)
+			}
+			linhasPorQuadra[id] = linha
+		}
+	}
+
+	nova := fmt.Sprintf("%s quadra=%d origem=%s", time.Now().Format(time.RFC3339), quadraID, origem)
+	if _, existe := linhasPorQuadra[quadraID]; !existe {
+		ordem = append(ordem, quadraID)
+	}
+	linhasPorQuadra[quadraID] = nova
+
+	var b strings.Builder
+	for _, id := range ordem {
+		b.WriteString(linhasPorQuadra[id])
+		b.WriteByte('\n')
+	}
+
+	if err := os.WriteFile(caminho, []byte(b.String()), 0644); err != nil {
+		log.Printf("[api] erro ao gravar sinal da botoeira: %v", err)
+	}
+}
+
+func parseQuadraDaLinha(linha string) (int, bool) {
+	const prefixo = "quadra="
+	i := strings.Index(linha, prefixo)
+	if i < 0 {
+		return 0, false
+	}
+	resto := linha[i+len(prefixo):]
+	fim := strings.IndexByte(resto, ' ')
+	if fim < 0 {
+		fim = len(resto)
+	}
+	n, err := strconv.Atoi(resto[:fim])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func (s *Server) autorizarReplay(r *http.Request) bool {

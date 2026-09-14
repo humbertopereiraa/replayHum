@@ -14,9 +14,12 @@ import (
 
 // Gerar cria o replay.mp4 e thumbnail.jpg a partir da lista de segmentos
 // informada, salvando na pasta de saída. Retorna os caminhos gerados.
-func Gerar(segmentos []string, pastaSaida string, cameraID int) (videoPath, thumbPath string, err error) {
+func Gerar(segmentos []string, pastaSaida string, cameraID, replaySeconds int) (videoPath, thumbPath string, err error) {
 	if len(segmentos) == 0 {
 		return "", "", fmt.Errorf("nenhum segmento disponível no buffer para esta câmera")
+	}
+	if replaySeconds <= 0 {
+		replaySeconds = 30
 	}
 
 	if err := os.MkdirAll(pastaSaida, 0755); err != nil {
@@ -26,6 +29,7 @@ func Gerar(segmentos []string, pastaSaida string, cameraID int) (videoPath, thum
 	nomeBase := fmt.Sprintf("quadra%d_%s", cameraID, time.Now().Format("20060102_150405"))
 	videoPath = filepath.Join(pastaSaida, nomeBase+".mp4")
 	thumbPath = filepath.Join(pastaSaida, nomeBase+".jpg")
+	concatPath := filepath.Join(pastaSaida, nomeBase+"_concat.mp4")
 
 	// FFmpeg concat demuxer precisa de uma lista de arquivos num .txt
 	listaPath, err := escreverListaConcat(segmentos)
@@ -34,24 +38,42 @@ func Gerar(segmentos []string, pastaSaida string, cameraID int) (videoPath, thum
 	}
 	defer os.Remove(listaPath)
 
-	// Concatena os segmentos com -c copy (rápido, sem recodificar)
 	cmdConcat := exec.Command("ffmpeg",
 		"-y",
 		"-f", "concat",
 		"-safe", "0",
 		"-i", listaPath,
 		"-c", "copy",
-		videoPath,
+		concatPath,
 	)
 	if out, err := cmdConcat.CombinedOutput(); err != nil {
+		_ = os.Remove(concatPath)
 		return "", "", fmt.Errorf("erro ao concatenar segmentos: %w\n%s", err, out)
 	}
+	defer os.Remove(concatPath)
 
-	// Extrai 1 frame do meio do vídeo como thumbnail
+	// Corta os últimos N segundos. Com -c copy o corte alinha no keyframe.
+	// Se o concat for mais curto que N, o FFmpeg usa o que houver.
+	cmdTrim := exec.Command("ffmpeg",
+		"-y",
+		"-sseof", fmt.Sprintf("-%d", replaySeconds),
+		"-i", concatPath,
+		"-t", fmt.Sprintf("%d", replaySeconds),
+		"-c", "copy",
+		videoPath,
+	)
+	if out, err := cmdTrim.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("erro ao cortar replay: %w\n%s", err, out)
+	}
+
+	ssThumb := replaySeconds / 2
+	if ssThumb < 1 {
+		ssThumb = 1
+	}
 	cmdThumb := exec.Command("ffmpeg",
 		"-y",
+		"-ss", fmt.Sprintf("%d", ssThumb),
 		"-i", videoPath,
-		"-ss", "1",
 		"-frames:v", "1",
 		thumbPath,
 	)
@@ -77,7 +99,7 @@ func escreverListaConcat(segmentos []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sb.WriteString(fmt.Sprintf("file '%s'\n", abs))
+		sb.WriteString(fmt.Sprintf("file '%s'\n", filepath.ToSlash(abs)))
 	}
 
 	if _, err := f.WriteString(sb.String()); err != nil {
@@ -87,7 +109,11 @@ func escreverListaConcat(segmentos []string) (string, error) {
 }
 
 // SegmentosNecessarios calcula quantos segmentos são necessários pra
-// cobrir a duração de replay desejada (ex: 30s), arredondando pra cima.
+// cobrir a duração de replay desejada, com 1 extra de margem para o
+// corte no keyframe (ex: 30s / 8s → 5).
 func SegmentosNecessarios(duracaoReplaySegundos, duracaoSegmentoSegundos int) int {
-	return int(math.Ceil(float64(duracaoReplaySegundos) / float64(duracaoSegmentoSegundos)))
+	if duracaoSegmentoSegundos <= 0 {
+		return 1
+	}
+	return int(math.Ceil(float64(duracaoReplaySegundos)/float64(duracaoSegmentoSegundos))) + 1
 }

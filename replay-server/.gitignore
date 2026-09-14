@@ -1,9 +1,10 @@
 # Segredos locais
 config.json
 
-# Dados gerados em runtime (vídeo, segmentos, thumbnails)
+# Dados gerados em runtime (vídeo, segmentos, thumbnails, last-seen da botoeira)
 buffer/
 replays/
+botoeira_ultimo_sinal.log
 
 # Binários
 *.exe
