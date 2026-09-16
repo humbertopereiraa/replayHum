@@ -39,7 +39,7 @@ export function unlockSession(): void {
 }
 
 function apiBase(): string {
-  const url = process.env.NEXT_PUBLIC_API_URL
+  const url = process.env.NEXT_API_URL
   if (!url) {
     throw new ApiError('URL da API não configurada', 0)
   }
