@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import pool from '../config/db';
 import { autenticarAluno } from '../middleware/auth';
 import { limiteDownload, limiteThumbnail } from '../middleware/rate-limit';
-import { gerarUrlDownload } from '../services/b2.service';
+import { gerarUrlDownload, gerarUrlStream } from '../services/b2.service';
 import type { Replay } from '../types';
 
 const router = express.Router();
@@ -30,6 +30,22 @@ router.get('/', autenticarAluno, async (req: Request, res: Response) => {
 
   const { rows } = await pool.query(sql, params);
   res.json(rows);
+});
+
+router.get('/:id/stream', autenticarAluno, limiteDownload, async (req: Request, res: Response) => {
+  const { rows } = await pool.query<Replay>(
+    `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
+    [req.params.id, req.unitId]
+  );
+
+  const replay = rows[0];
+  if (!replay) {
+    res.status(404).json({ erro: 'replay não encontrado' });
+    return;
+  }
+
+  const url = await gerarUrlStream(replay.b2_key_video, 3600);
+  res.json({ url, expira_em_segundos: 3600 });
 });
 
 router.get('/:id/download', autenticarAluno, limiteDownload, async (req: Request, res: Response) => {

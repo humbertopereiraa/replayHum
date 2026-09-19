@@ -15,7 +15,7 @@ jest.mock('@aws-sdk/s3-request-presigner', () => ({
 
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { gerarUrlDownload, gerarUrlUpload, obterMetadadosObjeto } from './b2.service';
+import { gerarUrlDownload, gerarUrlStream, gerarUrlUpload, obterMetadadosObjeto } from './b2.service';
 
 const MockS3Client = jest.mocked(S3Client);
 const mockGetSignedUrl = jest.mocked(getSignedUrl);
@@ -144,6 +144,44 @@ describe('b2.service', () => {
         Key: chave,
         ResponseContentDisposition: 'attachment; filename="replay-123.mp4"',
       });
+    });
+  });
+
+  describe('gerarUrlStream', () => {
+    it('deve gerar URL inline com video/mp4 e expiração padrão de 3600 segundos', async () => {
+      const chave = '1/quadra/123.mp4';
+
+      const url = await gerarUrlStream(chave);
+
+      expect(GetObjectCommand).toHaveBeenCalledWith({
+        Bucket: 'bucket-test',
+        Key: chave,
+        ResponseContentType: 'video/mp4',
+        ResponseContentDisposition: 'inline',
+      });
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          input: {
+            Bucket: 'bucket-test',
+            Key: chave,
+            ResponseContentType: 'video/mp4',
+            ResponseContentDisposition: 'inline',
+          },
+        }),
+        { expiresIn: 3600 }
+      );
+      expect(url).toBe('https://signed-url.test/arquivo');
+    });
+
+    it('deve respeitar expiração customizada', async () => {
+      await gerarUrlStream('1/quadra/123.mp4', 1800);
+
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Object),
+        { expiresIn: 1800 }
+      );
     });
   });
 });

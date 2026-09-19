@@ -124,6 +124,10 @@ export function getDownloadUrl(id: number): Promise<{ url: string; expira_em_seg
   return api(`/replays/${id}/download`)
 }
 
+export function getStreamUrl(id: number): Promise<{ url: string; expira_em_segundos: number }> {
+  return api(`/replays/${id}/stream`)
+}
+
 export function getThumbnailUrl(id: number): Promise<{ url: string }> {
   return api(`/replays/${id}/thumbnail`)
 }

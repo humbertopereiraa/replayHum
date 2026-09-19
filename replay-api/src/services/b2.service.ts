@@ -75,6 +75,19 @@ export async function gerarUrlDownload(
   return getSignedUrl(s3, comando, { expiresIn: expiraEmSegundos });
 }
 
+export async function gerarUrlStream(
+  chave: string,
+  expiraEmSegundos = 3600
+): Promise<string> {
+  const comando = new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: chave,
+    ResponseContentType: 'video/mp4',
+    ResponseContentDisposition: 'inline',
+  });
+  return getSignedUrl(s3, comando, { expiresIn: expiraEmSegundos });
+}
+
 function isNotFound(err: unknown): boolean {
   if (!err || typeof err !== 'object') {
     return false;

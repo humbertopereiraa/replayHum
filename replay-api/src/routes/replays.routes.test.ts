@@ -15,17 +15,19 @@ jest.mock('../config/db', () => ({
 
 jest.mock('../services/b2.service', () => ({
   gerarUrlDownload: jest.fn().mockResolvedValue('https://signed-url.test/video'),
+  gerarUrlStream: jest.fn().mockResolvedValue('https://signed-url.test/stream'),
 }));
 
 import express from 'express';
 import request from 'supertest';
 import pool from '../config/db';
 import replaysRoutes from './replays.routes';
-import { gerarUrlDownload } from '../services/b2.service';
+import { gerarUrlDownload, gerarUrlStream } from '../services/b2.service';
 import { createReplay } from '../test/helpers/fixtures';
 
 const mockQuery = jest.mocked(pool.query);
 const mockGerarUrlDownload = jest.mocked(gerarUrlDownload);
+const mockGerarUrlStream = jest.mocked(gerarUrlStream);
 
 function createApp() {
   const app = express();
@@ -37,6 +39,7 @@ describe('replays.routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGerarUrlDownload.mockResolvedValue('https://signed-url.test/arquivo');
+    mockGerarUrlStream.mockResolvedValue('https://signed-url.test/stream');
   });
 
   describe('GET /replays', () => {
@@ -70,6 +73,31 @@ describe('replays.routes', () => {
         expect.stringMatching(/quadra = \$2.*created_at::date = \$3/s),
         [1, 'Quadra 2', '2026-01-15']
       );
+    });
+  });
+
+  describe('GET /replays/:id/stream', () => {
+    it('deve retornar 404 quando replay não existe', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      const response = await request(createApp()).get('/replays/99/stream');
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ erro: 'replay não encontrado' });
+    });
+
+    it('deve retornar URL de stream inline', async () => {
+      const replay = createReplay({ id: 5, b2_key_video: '1/quadra/video.mp4' });
+      mockQuery.mockResolvedValue({ rows: [replay], rowCount: 1 });
+
+      const response = await request(createApp()).get('/replays/5/stream');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        url: 'https://signed-url.test/stream',
+        expira_em_segundos: 3600,
+      });
+      expect(mockGerarUrlStream).toHaveBeenCalledWith('1/quadra/video.mp4', 3600);
     });
   });
 

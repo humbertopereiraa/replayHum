@@ -25,6 +25,7 @@ import {
   ApiError,
   getDownloadUrl,
   getMe,
+  getStreamUrl,
   getThumbnailUrl,
   getToken,
   isSessionLocked,
@@ -503,9 +504,9 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
     return () => { cancelled = true }
   }, [replay.id])
 
-  const loadVideo = async () => {
+  const loadStream = async () => {
     if (videoUrl) return videoUrl
-    const { url } = await getDownloadUrl(replay.id)
+    const { url } = await getStreamUrl(replay.id)
     setVideoUrl(url)
     return url
   }
@@ -514,7 +515,7 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
     setLoadingVideo(true)
     setError('')
     try {
-      await loadVideo()
+      await loadStream()
       setPlaying(true)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onUnauthorized()
@@ -527,7 +528,7 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
   const download = async () => {
     setError('')
     try {
-      const url = await loadVideo()
+      const { url } = await getDownloadUrl(replay.id)
       triggerFileDownload(url, `replay-${replay.id}.mp4`)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onUnauthorized()
@@ -550,7 +551,14 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
         </div>
         <div className="player">
           {playing && videoUrl ? (
-            <video src={videoUrl} poster={thumbUrl ?? undefined} controls autoPlay playsInline />
+            <video
+              src={videoUrl}
+              poster={thumbUrl ?? undefined}
+              controls
+              autoPlay
+              playsInline
+              onError={() => setError('Não foi possível reproduzir o vídeo.')}
+            />
           ) : (
             <>
               {thumbUrl ? (
@@ -577,7 +585,7 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
         </div>
         <div className="security-notice">
           <LockKeyhole />
-          <span><strong>Link seguro e temporário</strong><small>Válido por poucos minutos e exclusivo para a sua conta.</small></span>
+          <span><strong>Link seguro e temporário</strong><small>A reprodução vale por cerca de 1 hora e é exclusiva para a sua conta.</small></span>
         </div>
       </main>
     </div>

@@ -25,7 +25,7 @@ replay-api/
 │   │   ├── auth.routes.ts      # OTP, /me, /logout
 │   │   ├── upload.routes.ts    # POST /upload/sign e /upload/confirm (servidor local Go)
 │   │   ├── students.routes.ts  # POST /students/import
-│   │   └── replays.routes.ts   # GET /replays, download e thumbnail
+│   │   └── replays.routes.ts   # GET /replays, stream, download e thumbnail
 │   └── server.ts             # junta tudo
 └── package.json
 ```
@@ -57,9 +57,23 @@ direto no editor SQL do painel (Supabase e Neon têm um embutido).
 ## Bucket B2
 
 O bucket deve ser **privado**. A API nunca entrega o MP4: ela devolve
-uma URL assinada (válida por 5 minutos). Quem tiver o link baixa o
-arquivo nesse intervalo, sem JWT. Replay da unidade é visível para
-todos os alunos da mesma academia (regra de produto).
+URLs assinadas. Replay da unidade é visível para todos os alunos da
+mesma academia (regra de produto).
+
+- **Stream** (`GET /replays/:id/stream`): `Content-Disposition: inline`,
+  válida por 1 hora — usada pelo `<video>` do site.
+- **Download** (`GET /replays/:id/download`):
+  `Content-Disposition: attachment`, válida por 5 minutos — força o
+  navegador a baixar o arquivo.
+
+Quem tiver o link acessa o objeto nesse intervalo, sem JWT.
+
+O player do site pede o MP4 **direto no B2**, não na API. O CORS do
+Express (`FRONTEND_URL`) não cobre isso. No painel do bucket, permita
+GET e HEAD da origem do site, com o header `Range`, e exponha
+`Content-Range`, `Accept-Ranges` e `Content-Type`. Sem isso, alguns
+navegadores (Safari em especial) podem recusar o play mesmo com a
+URL inline correta.
 
 ## Rodando localmente (desenvolvimento, com reload automático)
 
@@ -122,5 +136,6 @@ Quem não vier no lote é desativado.
 | POST | `/upload/confirm` | Servidor local (Go) | API Key de upload |
 | POST | `/students/import` | Operação da unidade | API Key de importação |
 | GET | `/replays` | Site (aluno) | JWT |
+| GET | `/replays/:id/stream` | Site (aluno) | JWT (30/min por aluno) |
 | GET | `/replays/:id/download` | Site (aluno) | JWT (30/min por aluno) |
 | GET | `/replays/:id/thumbnail` | Site (aluno) | JWT |
