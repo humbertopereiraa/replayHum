@@ -74,3 +74,17 @@ func TestEsperarSegmentoFecharRetornaQuandoRola(t *testing.T) {
 		t.Fatal("timeout esperando rollover do segmento")
 	}
 }
+
+func TestArgsCapturaComecaQuieto(t *testing.T) {
+	w := &Worker{BufferDir: t.TempDir(), SegmentSeconds: 8}
+	args := w.argsCaptura()
+	want := []string{"-hide_banner", "-loglevel", "error", "-nostats"}
+	if len(args) < len(want) {
+		t.Fatalf("args curtos: %v", args)
+	}
+	for i, flag := range want {
+		if args[i] != flag {
+			t.Fatalf("args[%d] = %q, want %q", i, args[i], flag)
+		}
+	}
+}

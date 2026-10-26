@@ -57,23 +57,29 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
+	origemIP := r.RemoteAddr
+	log.Printf("[api] %s %s de %s", r.Method, r.URL.Path, origemIP)
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "método não permitido", http.StatusMethodNotAllowed)
 		return
 	}
 
 	if !s.autorizarReplay(r) {
+		log.Printf("[api] recusado (401) de %s — token da botoeira não confere", origemIP)
 		http.Error(w, "não autorizado", http.StatusUnauthorized)
 		return
 	}
 
 	var req ReplayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[api] JSON inválido de %s: %v", origemIP, err)
 		http.Error(w, "JSON inválido", http.StatusBadRequest)
 		return
 	}
 
 	if _, ok := s.Workers[req.QuadraID]; !ok {
+		log.Printf("[api] quadra %d não encontrada (pedido de %s)", req.QuadraID, origemIP)
 		http.Error(w, "quadra/câmera não encontrada", http.StatusNotFound)
 		return
 	}
@@ -97,8 +103,11 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	// Processa a geração numa goroutine — a resposta HTTP volta rápido
 	// pro ESP32. A espera do segmento (até ~8s) e o FFmpeg ficam aqui.
 	go func() {
+		pedidoEm := time.Now()
 		timeout := time.Duration(s.Cfg.SegmentSeconds+2) * time.Second
 		worker.EsperarSegmentoFechar(timeout)
+		sobra := time.Since(pedidoEm) + time.Duration(s.Cfg.ReplayEndMarginMs)*time.Millisecond
+		log.Printf("[api] quadra %d: fim do replay %.3fs antes do fim do segmento", req.QuadraID, sobra.Seconds())
 
 		segmentosNecessarios := replay.SegmentosNecessarios(s.Cfg.ReplaySeconds, s.Cfg.SegmentSeconds)
 		segmentos, err := worker.UltimosSegmentos(segmentosNecessarios)
@@ -107,7 +116,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		videoPath, thumbPath, err := replay.Gerar(segmentos, s.Cfg.ReplayPath, req.QuadraID, s.Cfg.ReplaySeconds)
+		videoPath, thumbPath, err := replay.Gerar(segmentos, s.Cfg.ReplayPath, req.QuadraID, s.Cfg.ReplaySeconds, sobra)
 		if err != nil {
 			log.Printf("[api] erro ao gerar replay da quadra %d: %v", req.QuadraID, err)
 			return

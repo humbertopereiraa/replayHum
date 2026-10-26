@@ -5,6 +5,12 @@ config.json
 buffer/
 replays/
 botoeira_ultimo_sinal.log
+replay-server.log
+replay-server.log.old
+
+# Pacote Windows (build-windows.ps1)
+dist/
+replay-server-windows.zip
 
 # Binários
 *.exe

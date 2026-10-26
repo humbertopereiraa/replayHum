@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"time"
 
 	"replay-server/internal/config"
+	"replay-server/internal/ffmpeg"
 )
 
 const globSegmentos = "segment_*.mp4"
@@ -64,9 +64,17 @@ func (w *Worker) Run() {
 func (w *Worker) capturarUmaVez() error {
 	w.limparTodosSegmentos()
 
-	padraoSaida := filepath.Join(w.BufferDir, "segment_%Y%m%d_%H%M%S.mp4")
+	cmd := ffmpeg.Command(w.argsCaptura()...)
+	cmd.Stderr = ffmpeg.Stderr()
+	return cmd.Run() // bloqueia até o ffmpeg encerrar (erro ou desconexão)
+}
 
-	args := []string{
+func (w *Worker) argsCaptura() []string {
+	padraoSaida := filepath.Join(w.BufferDir, "segment_%Y%m%d_%H%M%S.mp4")
+	return []string{
+		"-hide_banner",
+		"-loglevel", "error",
+		"-nostats",
 		"-rtsp_transport", "tcp",
 		"-i", w.Cam.RTSPUrl,
 		"-c", "copy",
@@ -76,11 +84,6 @@ func (w *Worker) capturarUmaVez() error {
 		"-strftime", "1",
 		padraoSaida,
 	}
-
-	cmd := exec.Command("ffmpeg", args...)
-	cmd.Stderr = os.Stderr // útil pra depurar durante o desenvolvimento
-
-	return cmd.Run() // bloqueia até o ffmpeg encerrar (erro ou desconexão)
 }
 
 func (w *Worker) limparTodosSegmentos() {
