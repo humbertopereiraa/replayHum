@@ -38,9 +38,9 @@ export function hashSimples(valor: string): string {
   return crypto.createHash('sha256').update(valor).digest('hex');
 }
 
-export function hashOtp(codigo: string): string {
+export function hashAcesso(valor: string): string {
   const chave = process.env.EMAIL_HASH_KEY!;
-  return crypto.createHmac('sha256', chave).update(codigo).digest('hex');
+  return crypto.createHmac('sha256', chave).update(valor).digest('hex');
 }
 
 export function hashesIguais(a: string, b: string): boolean {

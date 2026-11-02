@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && node -e \"const fs=require('fs');fs.cpSync('src/templates','dist/templates',{recursive:true});fs.cpSync('src/assets','dist/assets',{recursive:true});\"",
+    "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -23,10 +23,10 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
+    "google-auth-library": "^10.9.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
-    "pg": "^8.23.0",
-    "resend": "^6.21.0"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@swc/core": "^1.16.1",

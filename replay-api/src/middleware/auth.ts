@@ -3,9 +3,20 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/db';
 import { hashSimples } from '../services/crypto.service';
 import { extrairToken } from '../services/auth-token.service';
-import type { JwtPayload, Student, Unit } from '../types';
+import type { JwtPayload, Unit } from '../types';
 
-export async function autenticarAluno(
+function payloadValido(payload: JwtPayload): boolean {
+  return (
+    typeof payload.sub === 'string' &&
+    payload.sub.length > 0 &&
+    typeof payload.nome === 'string' &&
+    payload.nome.length > 0 &&
+    typeof payload.unitId === 'number' &&
+    Number.isInteger(payload.unitId)
+  );
+}
+
+export async function autenticarUsuario(
   req: Request,
   res: Response,
   next: NextFunction
@@ -19,19 +30,24 @@ export async function autenticarAluno(
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
-    const { rows } = await pool.query<Pick<Student, 'id' | 'unit_id' | 'status'>>(
-      `SELECT id, unit_id, status FROM students WHERE id = $1`,
-      [payload.studentId]
-    );
-
-    const aluno = rows[0];
-    if (!aluno || aluno.status !== 'ativo') {
+    if (!payloadValido(payload)) {
       res.status(401).json({ erro: 'token inválido ou expirado' });
       return;
     }
 
-    req.studentId = aluno.id;
-    req.unitId = aluno.unit_id;
+    const { rows } = await pool.query<Pick<Unit, 'id'>>(
+      `SELECT id FROM units WHERE id = $1`,
+      [payload.unitId]
+    );
+
+    if (rows.length === 0) {
+      res.status(401).json({ erro: 'token inválido ou expirado' });
+      return;
+    }
+
+    req.googleSub = payload.sub;
+    req.usuarioNome = payload.nome;
+    req.unitId = payload.unitId;
     next();
   } catch {
     res.status(401).json({ erro: 'token inválido ou expirado' });
@@ -43,23 +59,6 @@ export async function autenticarServidorLocal(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  await autenticarPorHashDeUnidade(req, res, next, 'api_key_hash');
-}
-
-export async function autenticarImportacao(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  await autenticarPorHashDeUnidade(req, res, next, 'import_api_key_hash');
-}
-
-async function autenticarPorHashDeUnidade(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-  coluna: 'api_key_hash' | 'import_api_key_hash'
-): Promise<void> {
   const apiKey = req.headers.authorization?.replace('Bearer ', '');
 
   if (!apiKey) {
@@ -69,7 +68,7 @@ async function autenticarPorHashDeUnidade(
 
   const apiKeyHash = hashSimples(apiKey);
   const { rows } = await pool.query<Pick<Unit, 'id'>>(
-    `SELECT id FROM units WHERE ${coluna} = $1`,
+    `SELECT id FROM units WHERE api_key_hash = $1`,
     [apiKeyHash]
   );
 

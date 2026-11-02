@@ -25,33 +25,9 @@ export const limiteGlobal = rateLimit({
   keyGenerator: chaveIp,
 });
 
-export const limiteOtpPorIp = rateLimit({
+export const limiteLoginGooglePorIp = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: emTeste,
-  handler: responder429,
-  keyGenerator: chaveIp,
-});
-
-export const limiteOtpPorEmail = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 3,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: emTeste,
-  handler: responder429,
-  validate: { keyGeneratorIpFallback: false },
-  keyGenerator: (req) => {
-    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-    return email ? `otp-email:${email}` : `otp-email:${chaveIp(req)}`;
-  },
-});
-
-export const limiteVerifyOtpPorIp = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
   skip: emTeste,
@@ -67,7 +43,7 @@ export const limiteDownload = rateLimit({
   skip: emTeste,
   handler: responder429,
   validate: { keyGeneratorIpFallback: false },
-  keyGenerator: (req) => `download:${req.studentId ?? chaveIp(req)}`,
+  keyGenerator: (req) => `download:${req.googleSub ?? chaveIp(req)}`,
 });
 
 export const limiteThumbnail = rateLimit({
@@ -78,5 +54,5 @@ export const limiteThumbnail = rateLimit({
   skip: emTeste,
   handler: responder429,
   validate: { keyGeneratorIpFallback: false },
-  keyGenerator: (req) => `thumb:${req.studentId ?? chaveIp(req)}`,
+  keyGenerator: (req) => `thumb:${req.googleSub ?? chaveIp(req)}`,
 });

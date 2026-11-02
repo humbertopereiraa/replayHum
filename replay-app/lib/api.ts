@@ -70,17 +70,20 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export type AlunoPerfil = { nome: string }
+export type UsuarioPerfil = { nome: string }
 export type UnidadePerfil = { nome: string }
 
 export type PerfilResponse = {
-  aluno: AlunoPerfil
+  usuario: UsuarioPerfil
   unidade: UnidadePerfil
 }
 
-export type AuthResponse =
-  | { status: 'código enviado' }
-  | { status: 'autenticado'; token: string; aluno: AlunoPerfil; unidade: UnidadePerfil }
+export type AuthResponse = {
+  status: 'autenticado'
+  token: string
+  usuario: UsuarioPerfil
+  unidade: UnidadePerfil
+}
 
 export type ReplayRow = {
   id: number
@@ -94,17 +97,13 @@ export type ReplayFilters = {
   data?: string
 }
 
-export function requestOtp(email: string): Promise<AuthResponse> {
-  return api<AuthResponse>('/auth/request-otp', {
+export function loginGoogle(
+  credential: string,
+  acesso: { codigo: string } | { qrToken: string }
+): Promise<AuthResponse> {
+  return api<AuthResponse>('/auth/google', {
     method: 'POST',
-    body: JSON.stringify({ email }),
-  })
-}
-
-export function verifyOtp(email: string, codigo: string): Promise<AuthResponse> {
-  return api<AuthResponse>('/auth/verify-otp', {
-    method: 'POST',
-    body: JSON.stringify({ email, codigo }),
+    body: JSON.stringify({ credential, ...acesso }),
   })
 }
 

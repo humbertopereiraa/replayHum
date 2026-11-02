@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
-import { autenticarAluno } from '../middleware/auth';
+import { autenticarUsuario } from '../middleware/auth';
 import { limiteDownload, limiteThumbnail } from '../middleware/rate-limit';
 import { gerarUrlDownload, gerarUrlStream } from '../services/b2.service';
 import type { Replay } from '../types';
@@ -9,7 +9,7 @@ const router = express.Router();
 
 const RETENCAO_HORAS = 48;
 
-router.get('/', autenticarAluno, async (req: Request, res: Response) => {
+router.get('/', autenticarUsuario, async (req: Request, res: Response) => {
   const { quadra, data } = req.query as { quadra?: string; data?: string };
 
   let sql = `SELECT id, quadra, duracao_seg, created_at
@@ -32,7 +32,7 @@ router.get('/', autenticarAluno, async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-router.get('/:id/stream', autenticarAluno, limiteDownload, async (req: Request, res: Response) => {
+router.get('/:id/stream', autenticarUsuario, limiteDownload, async (req: Request, res: Response) => {
   const { rows } = await pool.query<Replay>(
     `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
     [req.params.id, req.unitId]
@@ -48,7 +48,7 @@ router.get('/:id/stream', autenticarAluno, limiteDownload, async (req: Request, 
   res.json({ url, expira_em_segundos: 3600 });
 });
 
-router.get('/:id/download', autenticarAluno, limiteDownload, async (req: Request, res: Response) => {
+router.get('/:id/download', autenticarUsuario, limiteDownload, async (req: Request, res: Response) => {
   const { rows } = await pool.query<Replay>(
     `SELECT * FROM replays WHERE id = $1 AND unit_id = $2`,
     [req.params.id, req.unitId]
@@ -66,7 +66,7 @@ router.get('/:id/download', autenticarAluno, limiteDownload, async (req: Request
 
 router.get(
   '/:id/thumbnail',
-  autenticarAluno,
+  autenticarUsuario,
   limiteThumbnail,
   async (req: Request, res: Response) => {
     const { rows } = await pool.query<Replay>(

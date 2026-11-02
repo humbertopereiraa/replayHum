@@ -6,7 +6,7 @@ jest.mock('../config/db', () => ({
 
 import jwt from 'jsonwebtoken';
 import pool from '../config/db';
-import { autenticarAluno, autenticarImportacao, autenticarServidorLocal } from './auth';
+import { autenticarServidorLocal, autenticarUsuario } from './auth';
 import { createMockRequest } from '../test/helpers/mock-request';
 import { createMockResponse } from '../test/helpers/mock-response';
 import { hashSimples } from '../services/crypto.service';
@@ -15,8 +15,12 @@ import type { JwtPayload } from '../types';
 const mockVerify = jest.mocked(jwt.verify);
 const mockQuery = jest.mocked(pool.query);
 
-function alunoAtivo(id = 10, unitId = 1) {
-  return { rows: [{ id, unit_id: unitId, status: 'ativo' as const }], rowCount: 1 };
+function unidadeExiste(id = 1) {
+  return { rows: [{ id }], rowCount: 1 };
+}
+
+function sessao(unitId = 1, sub = 'google-sub'): JwtPayload {
+  return { sub, nome: 'João', unitId };
 }
 
 describe('auth middleware', () => {
@@ -24,13 +28,13 @@ describe('auth middleware', () => {
     jest.clearAllMocks();
   });
 
-  describe('autenticarAluno', () => {
+  describe('autenticarUsuario', () => {
     it('deve retornar 401 quando não há token', async () => {
       const req = createMockRequest();
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
       expect(res.statusCode).toBe(401);
       expect(res.jsonBody).toEqual({ erro: 'não autenticado' });
@@ -38,26 +42,27 @@ describe('auth middleware', () => {
     });
 
     it('deve autenticar via cookie token', async () => {
-      const payload: JwtPayload = { studentId: 10, unitId: 1 };
+      const payload = sessao();
       mockVerify.mockReturnValue(payload as jwt.JwtPayload);
-      mockQuery.mockResolvedValue(alunoAtivo());
+      mockQuery.mockResolvedValue(unidadeExiste());
 
       const req = createMockRequest({ cookies: { token: 'jwt-token' } });
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
       expect(mockVerify).toHaveBeenCalledWith('jwt-token', 'jwt-secreto-teste');
-      expect(req.studentId).toBe(10);
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('FROM units'), [1]);
+      expect(req.googleSub).toBe('google-sub');
+      expect(req.usuarioNome).toBe('João');
       expect(req.unitId).toBe(1);
       expect(next).toHaveBeenCalled();
     });
 
     it('deve autenticar via Authorization Bearer', async () => {
-      const payload: JwtPayload = { studentId: 20, unitId: 2 };
-      mockVerify.mockReturnValue(payload as jwt.JwtPayload);
-      mockQuery.mockResolvedValue(alunoAtivo(20, 2));
+      mockVerify.mockReturnValue(sessao(2, 'outro-sub') as jwt.JwtPayload);
+      mockQuery.mockResolvedValue(unidadeExiste(2));
 
       const req = createMockRequest({
         headers: { authorization: 'Bearer jwt-header-token' },
@@ -65,17 +70,17 @@ describe('auth middleware', () => {
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
       expect(mockVerify).toHaveBeenCalledWith('jwt-header-token', 'jwt-secreto-teste');
-      expect(req.studentId).toBe(20);
+      expect(req.googleSub).toBe('outro-sub');
       expect(req.unitId).toBe(2);
       expect(next).toHaveBeenCalled();
     });
 
     it('deve preferir Bearer quando cookie e header estão presentes', async () => {
-      mockVerify.mockReturnValue({ studentId: 20, unitId: 2 } as jwt.JwtPayload);
-      mockQuery.mockResolvedValue(alunoAtivo(20, 2));
+      mockVerify.mockReturnValue(sessao(2, 'outro-sub') as jwt.JwtPayload);
+      mockQuery.mockResolvedValue(unidadeExiste(2));
 
       const req = createMockRequest({
         cookies: { token: 'jwt-cookie' },
@@ -84,54 +89,37 @@ describe('auth middleware', () => {
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
       expect(mockVerify).toHaveBeenCalledWith('jwt-header-token', 'jwt-secreto-teste');
       expect(next).toHaveBeenCalled();
     });
 
-    it('deve usar unit_id do banco, não o do JWT', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 99 } as jwt.JwtPayload);
-      mockQuery.mockResolvedValue(alunoAtivo(10, 1));
-
-      const req = createMockRequest({ cookies: { token: 'jwt-token' } });
-      const res = createMockResponse();
-      const next = jest.fn();
-
-      await autenticarAluno(req, res, next);
-
-      expect(req.unitId).toBe(1);
-      expect(next).toHaveBeenCalled();
-    });
-
-    it('deve retornar 401 quando o aluno está inativo', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as jwt.JwtPayload);
-      mockQuery.mockResolvedValue({
-        rows: [{ id: 10, unit_id: 1, status: 'inativo' }],
-        rowCount: 1,
-      });
-
-      const req = createMockRequest({ cookies: { token: 'jwt-token' } });
-      const res = createMockResponse();
-      const next = jest.fn();
-
-      await autenticarAluno(req, res, next);
-
-      expect(res.statusCode).toBe(401);
-      expect(res.jsonBody).toEqual({ erro: 'token inválido ou expirado' });
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('deve retornar 401 quando o aluno não existe', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as jwt.JwtPayload);
+    it('deve retornar 401 quando a unidade não existe', async () => {
+      mockVerify.mockReturnValue(sessao(99) as jwt.JwtPayload);
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       const req = createMockRequest({ cookies: { token: 'jwt-token' } });
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
+      expect(res.statusCode).toBe(401);
+      expect(res.jsonBody).toEqual({ erro: 'token inválido ou expirado' });
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('deve retornar 401 quando o payload não tem unidade', async () => {
+      mockVerify.mockReturnValue({ sub: 'google-sub', nome: 'João' } as jwt.JwtPayload);
+
+      const req = createMockRequest({ cookies: { token: 'jwt-token' } });
+      const res = createMockResponse();
+      const next = jest.fn();
+
+      await autenticarUsuario(req, res, next);
+
+      expect(mockQuery).not.toHaveBeenCalled();
       expect(res.statusCode).toBe(401);
       expect(next).not.toHaveBeenCalled();
     });
@@ -145,7 +133,7 @@ describe('auth middleware', () => {
       const res = createMockResponse();
       const next = jest.fn();
 
-      await autenticarAluno(req, res, next);
+      await autenticarUsuario(req, res, next);
 
       expect(res.statusCode).toBe(401);
       expect(res.jsonBody).toEqual({ erro: 'token inválido ou expirado' });
@@ -198,42 +186,6 @@ describe('auth middleware', () => {
       await autenticarServidorLocal(req, res, next);
 
       expect(req.unitId).toBe(5);
-      expect(next).toHaveBeenCalled();
-    });
-  });
-
-  describe('autenticarImportacao', () => {
-    it('deve consultar import_api_key_hash, não a key de upload', async () => {
-      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
-
-      const req = createMockRequest({
-        headers: { authorization: 'Bearer chave-de-upload' },
-      });
-      const res = createMockResponse();
-      const next = jest.fn();
-
-      await autenticarImportacao(req, res, next);
-
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('import_api_key_hash'),
-        [hashSimples('chave-de-upload')]
-      );
-      expect(res.statusCode).toBe(401);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('deve autenticar quando a key de importação é válida', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 3 }], rowCount: 1 });
-
-      const req = createMockRequest({
-        headers: { authorization: 'Bearer chave-import' },
-      });
-      const res = createMockResponse();
-      const next = jest.fn();
-
-      await autenticarImportacao(req, res, next);
-
-      expect(req.unitId).toBe(3);
       expect(next).toHaveBeenCalled();
     });
   });

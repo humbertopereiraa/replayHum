@@ -1,122 +1,69 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
-import { hashEmail } from '../services/crypto.service';
-import { solicitarCodigo, verificarCodigo } from '../services/otp.service';
+import { encryptEmail, hashAcesso, hashEmail } from '../services/crypto.service';
+import { verificarTokenGoogle } from '../services/google.service';
 import {
   aplicarCookieToken,
   emitirToken,
-  lerTokenValido,
   limparCookieToken,
 } from '../services/auth-token.service';
-import { autenticarAluno } from '../middleware/auth';
-import {
-  limiteOtpPorEmail,
-  limiteOtpPorIp,
-  limiteVerifyOtpPorIp,
-} from '../middleware/rate-limit';
-import type { Student } from '../types';
+import { autenticarUsuario } from '../middleware/auth';
+import { limiteLoginGooglePorIp } from '../middleware/rate-limit';
 
 const router = express.Router();
 
-type PerfilAluno = {
-  aluno: { nome: string };
-  unidade: { nome: string };
+type CorpoLogin = {
+  credential?: string;
+  codigo?: string;
+  qrToken?: string;
 };
 
-async function buscarPerfilAluno(studentId: number): Promise<PerfilAluno | null> {
-  const { rows } = await pool.query<{ aluno_nome: string; unidade_nome: string }>(
-    `SELECT s.nome AS aluno_nome, u.nome AS unidade_nome
-     FROM students s
-     JOIN units u ON u.id = s.unit_id
-     WHERE s.id = $1 AND s.status = 'ativo'`,
-    [studentId]
+router.post('/google', limiteLoginGooglePorIp, async (req: Request, res: Response) => {
+  const { credential, codigo, qrToken } = req.body as CorpoLogin;
+  const segredoDigitado = typeof codigo === 'string' ? codigo.trim().toUpperCase() : '';
+  const tokenQr = typeof qrToken === 'string' ? qrToken.trim() : '';
+  const temCodigo = segredoDigitado.length > 0;
+  const temQr = tokenQr.length > 0;
+
+  if (typeof credential !== 'string' || credential.length === 0 || temCodigo === temQr) {
+    res.status(400).json({ erro: 'envie o login do Google e exatamente um código de acesso' });
+    return;
+  }
+
+  const coluna = temCodigo ? 'codigo_acesso_hash' : 'qr_token_hash';
+  const hash = hashAcesso(temCodigo ? segredoDigitado : tokenQr);
+
+  const { rows } = await pool.query<{ id: number; nome: string }>(
+    `SELECT id, nome FROM units WHERE ${coluna} = $1`,
+    [hash]
   );
 
-  const row = rows[0];
-  if (!row) return null;
-
-  return {
-    aluno: { nome: row.aluno_nome },
-    unidade: { nome: row.unidade_nome },
-  };
-}
-
-router.post(
-  '/request-otp',
-  limiteOtpPorIp,
-  limiteOtpPorEmail,
-  async (req: Request, res: Response) => {
-    const { email } = req.body as { email?: string };
-    if (!email) {
-      res.status(400).json({ erro: 'e-mail é obrigatório' });
-      return;
-    }
-
-    const emailHash = hashEmail(email);
-
-    const { rows } = await pool.query<Pick<Student, 'id' | 'nome'>>(
-      `SELECT id, nome FROM students WHERE email_hash = $1 AND status = 'ativo'`,
-      [emailHash]
-    );
-
-    if (rows.length === 0) {
-      res.json({ status: 'código enviado' });
-      return;
-    }
-
-    const aluno = rows[0];
-    const sessao = lerTokenValido(req);
-
-    if (sessao && sessao.payload.studentId === aluno.id) {
-      aplicarCookieToken(res, sessao.token);
-      const perfil = await buscarPerfilAluno(aluno.id);
-      res.json({
-        status: 'autenticado',
-        token: sessao.token,
-        ...(perfil ?? { aluno: { nome: aluno.nome }, unidade: { nome: '' } }),
-      });
-      return;
-    }
-
-    await solicitarCodigo(aluno.id, email, aluno.nome);
-    res.json({ status: 'código enviado' });
-  }
-);
-
-router.post('/verify-otp', limiteVerifyOtpPorIp, async (req: Request, res: Response) => {
-  const { email, codigo } = req.body as { email?: string; codigo?: string };
-  if (!email || !codigo) {
-    res.status(400).json({ erro: 'e-mail e código são obrigatórios' });
+  const unidade = rows[0];
+  if (!unidade) {
+    res.status(401).json({ erro: 'código inválido' });
     return;
   }
 
-  const emailHash = hashEmail(email);
+  const google = await verificarTokenGoogle(credential);
+  if (!google) {
+    res.status(401).json({ erro: 'login inválido' });
+    return;
+  }
 
-  const { rows } = await pool.query<Pick<Student, 'id' | 'unit_id'>>(
-    `SELECT id, unit_id FROM students WHERE email_hash = $1 AND status = 'ativo'`,
-    [emailHash]
+  await pool.query(
+    `INSERT INTO logins (google_sub, nome, email_hash, email_encrypted, unit_id)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [google.sub, google.nome, hashEmail(google.email), encryptEmail(google.email), unidade.id]
   );
 
-  const aluno = rows[0];
-  if (!aluno) {
-    res.status(401).json({ erro: 'código inválido ou expirado' });
-    return;
-  }
-
-  const valido = await verificarCodigo(aluno.id, codigo);
-  if (!valido) {
-    res.status(401).json({ erro: 'código inválido ou expirado' });
-    return;
-  }
-
-  const token = emitirToken(aluno);
+  const token = emitirToken({ sub: google.sub, nome: google.nome, unitId: unidade.id });
   aplicarCookieToken(res, token);
 
-  const perfil = await buscarPerfilAluno(aluno.id);
   res.json({
     status: 'autenticado',
     token,
-    ...(perfil ?? { aluno: { nome: '' }, unidade: { nome: '' } }),
+    usuario: { nome: google.nome },
+    unidade: { nome: unidade.nome },
   });
 });
 
@@ -125,14 +72,22 @@ router.post('/logout', (_req: Request, res: Response) => {
   res.status(204).send();
 });
 
-router.get('/me', autenticarAluno, async (req: Request, res: Response) => {
-  const perfil = await buscarPerfilAluno(req.studentId!);
-  if (!perfil) {
-    res.status(404).json({ erro: 'aluno não encontrado' });
+router.get('/me', autenticarUsuario, async (req: Request, res: Response) => {
+  const { rows } = await pool.query<{ nome: string }>(
+    `SELECT nome FROM units WHERE id = $1`,
+    [req.unitId]
+  );
+
+  const unidade = rows[0];
+  if (!unidade) {
+    res.status(404).json({ erro: 'unidade não encontrada' });
     return;
   }
 
-  res.json(perfil);
+  res.json({
+    usuario: { nome: req.usuarioNome },
+    unidade: { nome: unidade.nome },
+  });
 });
 
 export default router;

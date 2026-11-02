@@ -5,26 +5,18 @@ export interface Unit {
   nome: string;
   api_key_hash: string;
   import_api_key_hash: string | null;
+  codigo_acesso_hash: string | null;
+  qr_token_hash: string | null;
   created_at: Date;
 }
 
-export interface Student {
+export interface LoginRegistro {
   id: number;
-  unit_id: number;
+  google_sub: string;
   nome: string;
   email_hash: string;
   email_encrypted: string;
-  status: 'ativo' | 'inativo';
-  created_at: Date;
-}
-
-export interface OtpCode {
-  id: number;
-  student_id: number;
-  code_hash: string;
-  expires_at: Date;
-  tentativas: number;
-  usado: boolean;
+  unit_id: number;
   created_at: Date;
 }
 
@@ -40,17 +32,19 @@ export interface Replay {
 }
 
 export interface JwtPayload {
-  studentId: number;
+  sub: string;
+  nome: string;
   unitId: number;
 }
 
 // Extensão do Request do Express: adiciona os campos que os
-// middlewares de autenticação preenchem (req.studentId, req.unitId),
+// middlewares de autenticação preenchem (req.googleSub, req.unitId),
 // para eles terem checagem de tipo em qualquer rota.
 declare global {
   namespace Express {
     interface Request {
-      studentId?: number;
+      googleSub?: string;
+      usuarioNome?: string;
       unitId?: number;
     }
   }

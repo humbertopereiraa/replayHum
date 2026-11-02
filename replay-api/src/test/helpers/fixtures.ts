@@ -1,30 +1,4 @@
-import type { OtpCode, Replay, Student } from '../../types';
-
-export function createOtpCode(overrides: Partial<OtpCode> = {}): OtpCode {
-  return {
-    id: 1,
-    student_id: 10,
-    code_hash: 'hash-teste',
-    expires_at: new Date(Date.now() + 5 * 60 * 1000),
-    tentativas: 0,
-    usado: false,
-    created_at: new Date(),
-    ...overrides,
-  };
-}
-
-export function createStudent(overrides: Partial<Student> = {}): Student {
-  return {
-    id: 10,
-    unit_id: 1,
-    nome: 'Aluno Teste',
-    email_hash: 'email-hash-teste',
-    email_encrypted: 'email-cifrado-teste',
-    status: 'ativo',
-    created_at: new Date(),
-    ...overrides,
-  };
-}
+import type { Replay } from '../../types';
 
 export function createReplay(overrides: Partial<Replay> = {}): Replay {
   return {

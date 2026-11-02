@@ -3,9 +3,8 @@ jest.mock('../config/db', () => ({
   default: { query: jest.fn() },
 }));
 
-jest.mock('../services/otp.service', () => ({
-  solicitarCodigo: jest.fn().mockResolvedValue(undefined),
-  verificarCodigo: jest.fn(),
+jest.mock('../services/google.service', () => ({
+  verificarTokenGoogle: jest.fn(),
 }));
 
 jest.mock('jsonwebtoken');
@@ -16,11 +15,11 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import pool from '../config/db';
 import authRoutes from './auth.routes';
-import { solicitarCodigo, verificarCodigo } from '../services/otp.service';
+import { verificarTokenGoogle } from '../services/google.service';
+import { encryptEmail, hashAcesso, hashEmail } from '../services/crypto.service';
 
 const mockQuery = jest.mocked(pool.query);
-const mockSolicitarCodigo = jest.mocked(solicitarCodigo);
-const mockVerificarCodigo = jest.mocked(verificarCodigo);
+const mockGoogle = jest.mocked(verificarTokenGoogle);
 const mockSign = jest.mocked(jwt.sign);
 const mockVerify = jest.mocked(jwt.verify);
 
@@ -32,157 +31,103 @@ function createApp() {
   return app;
 }
 
+const identidade = { sub: 'google-sub', email: 'joao@gmail.com', nome: 'João' };
+
 describe('auth.routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSign.mockReturnValue('jwt-token-gerado' as never);
   });
 
-  describe('POST /auth/request-otp', () => {
-    it('deve retornar 400 quando email não é informado', async () => {
-      const response = await request(createApp()).post('/auth/request-otp').send({});
+  describe('POST /auth/google', () => {
+    it('deve retornar 400 sem o token do Google', async () => {
+      const response = await request(createApp()).post('/auth/google').send({ codigo: 'ABCD2345' });
 
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ erro: 'e-mail é obrigatório' });
-    });
-
-    it('deve retornar o mesmo 200 quando email não é encontrado', async () => {
-      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
-
-      const response = await request(createApp())
-        .post('/auth/request-otp')
-        .send({ email: 'naoexiste@test.com' });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'código enviado' });
-      expect(mockSolicitarCodigo).not.toHaveBeenCalled();
-    });
-
-    it('deve solicitar código e retornar 200 quando email existe e não há sessão', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 });
-
-      const response = await request(createApp())
-        .post('/auth/request-otp')
-        .send({ email: 'aluno@test.com' });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'código enviado' });
-      expect(mockSolicitarCodigo).toHaveBeenCalledWith(10, 'aluno@test.com', 'João');
-    });
-
-    it('deve devolver token e perfil sem enviar email quando já autenticado', async () => {
-      mockQuery
-        .mockResolvedValueOnce({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 })
-        .mockResolvedValueOnce({
-          rows: [{ aluno_nome: 'João', unidade_nome: 'Arena Central' }],
-          rowCount: 1,
-        });
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
-
-      const response = await request(createApp())
-        .post('/auth/request-otp')
-        .set('Cookie', ['token=jwt-existente'])
-        .send({ email: 'aluno@test.com' });
-
-      expect(response.status).toBe(200);
       expect(response.body).toEqual({
-        status: 'autenticado',
-        token: 'jwt-existente',
-        aluno: { nome: 'João' },
-        unidade: { nome: 'Arena Central' },
+        erro: 'envie o login do Google e exatamente um código de acesso',
       });
-      expect(mockSolicitarCodigo).not.toHaveBeenCalled();
-
-      const cookie = response.headers['set-cookie']?.[0] ?? '';
-      expect(cookie).toContain('token=jwt-existente');
+      expect(mockQuery).not.toHaveBeenCalled();
     });
 
-    it('deve solicitar código quando JWT é de outro aluno', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 });
-      mockVerify.mockReturnValue({ studentId: 99, unitId: 1 } as never);
-
+    it('deve retornar 400 quando código e QR vêm juntos', async () => {
       const response = await request(createApp())
-        .post('/auth/request-otp')
-        .set('Cookie', ['token=jwt-outro-aluno'])
-        .send({ email: 'aluno@test.com' });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'código enviado' });
-      expect(mockSolicitarCodigo).toHaveBeenCalledWith(10, 'aluno@test.com', 'João');
-    });
-
-    it('deve solicitar código quando JWT está expirado', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, nome: 'João' }], rowCount: 1 });
-      mockVerify.mockImplementation(() => {
-        throw new Error('jwt expired');
-      });
-
-      const response = await request(createApp())
-        .post('/auth/request-otp')
-        .set('Cookie', ['token=jwt-expirado'])
-        .send({ email: 'aluno@test.com' });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'código enviado' });
-      expect(mockSolicitarCodigo).toHaveBeenCalledWith(10, 'aluno@test.com', 'João');
-    });
-  });
-
-  describe('POST /auth/verify-otp', () => {
-    it('deve retornar 400 quando email ou código não são informados', async () => {
-      const response = await request(createApp())
-        .post('/auth/verify-otp')
-        .send({ email: 'aluno@test.com' });
+        .post('/auth/google')
+        .send({ credential: 'tok', codigo: 'ABCD2345', qrToken: 'abc' });
 
       expect(response.status).toBe(400);
-      expect(response.body).toEqual({ erro: 'e-mail e código são obrigatórios' });
+      expect(mockGoogle).not.toHaveBeenCalled();
     });
 
-    it('deve retornar 401 quando aluno não existe', async () => {
+    it('deve retornar 401 quando o código não existe e não consulta o Google', async () => {
       mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
-        .post('/auth/verify-otp')
-        .send({ email: 'aluno@test.com', codigo: '123456' });
+        .post('/auth/google')
+        .send({ credential: 'tok', codigo: 'abcd2345' });
 
       expect(response.status).toBe(401);
-      expect(response.body).toEqual({ erro: 'código inválido ou expirado' });
+      expect(response.body).toEqual({ erro: 'código inválido' });
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('codigo_acesso_hash'),
+        [hashAcesso('ABCD2345')]
+      );
+      expect(mockGoogle).not.toHaveBeenCalled();
     });
 
-    it('deve retornar 401 quando código é inválido', async () => {
-      mockQuery.mockResolvedValue({ rows: [{ id: 10, unit_id: 1 }], rowCount: 1 });
-      mockVerificarCodigo.mockResolvedValue(false);
+    it('deve buscar a unidade pelo token do QR', async () => {
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+
+      await request(createApp())
+        .post('/auth/google')
+        .send({ credential: 'tok', qrToken: 'token-do-qr' });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('qr_token_hash'),
+        [hashAcesso('token-do-qr')]
+      );
+    });
+
+    it('deve retornar 401 quando o Google recusa o token, sem gravar login', async () => {
+      mockQuery.mockResolvedValue({ rows: [{ id: 1, nome: 'Arena Central' }], rowCount: 1 });
+      mockGoogle.mockResolvedValue(null);
 
       const response = await request(createApp())
-        .post('/auth/verify-otp')
-        .send({ email: 'aluno@test.com', codigo: '000000' });
+        .post('/auth/google')
+        .send({ credential: 'tok', codigo: 'ABCD2345' });
 
       expect(response.status).toBe(401);
-      expect(response.body).toEqual({ erro: 'código inválido ou expirado' });
+      expect(response.body).toEqual({ erro: 'login inválido' });
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
 
-    it('deve autenticar, emitir JWT, definir cookie e devolver perfil', async () => {
+    it('deve gravar o login e emitir a sessão', async () => {
       mockQuery
-        .mockResolvedValueOnce({ rows: [{ id: 10, unit_id: 1 }], rowCount: 1 })
-        .mockResolvedValueOnce({
-          rows: [{ aluno_nome: 'João', unidade_nome: 'Arena Central' }],
-          rowCount: 1,
-        });
-      mockVerificarCodigo.mockResolvedValue(true);
+        .mockResolvedValueOnce({ rows: [{ id: 1, nome: 'Arena Central' }], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+      mockGoogle.mockResolvedValue(identidade);
 
       const response = await request(createApp())
-        .post('/auth/verify-otp')
-        .send({ email: 'aluno@test.com', codigo: '123456' });
+        .post('/auth/google')
+        .send({ credential: 'tok', codigo: 'ABCD2345' });
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({
         status: 'autenticado',
         token: 'jwt-token-gerado',
-        aluno: { nome: 'João' },
+        usuario: { nome: 'João' },
         unidade: { nome: 'Arena Central' },
       });
+      expect(mockQuery).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('INSERT INTO logins'),
+        ['google-sub', 'João', hashEmail('joao@gmail.com'), expect.any(String), 1]
+      );
+      const emailCifrado = mockQuery.mock.calls[1][1][3] as string;
+      expect(emailCifrado).not.toContain('joao@gmail.com');
+      expect(encryptEmail('joao@gmail.com').split(':')).toHaveLength(3);
       expect(mockSign).toHaveBeenCalledWith(
-        { studentId: 10, unitId: 1 },
+        { sub: 'google-sub', nome: 'João', unitId: 1 },
         'jwt-secreto-teste',
         { expiresIn: '7d' }
       );
@@ -213,17 +158,11 @@ describe('auth.routes', () => {
       expect(response.body).toEqual({ erro: 'não autenticado' });
     });
 
-    it('deve retornar perfil do aluno autenticado', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
+    it('deve montar o perfil pelo JWT e pela unidade, sem consultar logins', async () => {
+      mockVerify.mockReturnValue({ sub: 'google-sub', nome: 'João Silva', unitId: 1 } as never);
       mockQuery
-        .mockResolvedValueOnce({
-          rows: [{ id: 10, unit_id: 1, status: 'ativo' }],
-          rowCount: 1,
-        })
-        .mockResolvedValueOnce({
-          rows: [{ aluno_nome: 'João Silva', unidade_nome: 'Arena Central' }],
-          rowCount: 1,
-        });
+        .mockResolvedValueOnce({ rows: [{ id: 1 }], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [{ nome: 'Arena Central' }], rowCount: 1 });
 
       const response = await request(createApp())
         .get('/auth/me')
@@ -231,17 +170,17 @@ describe('auth.routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({
-        aluno: { nome: 'João Silva' },
+        usuario: { nome: 'João Silva' },
         unidade: { nome: 'Arena Central' },
       });
+      const sqls = mockQuery.mock.calls.map((call) => String(call[0]));
+      expect(sqls.every((sql) => sql.includes('units'))).toBe(true);
+      expect(sqls.some((sql) => sql.includes('logins'))).toBe(false);
     });
 
-    it('deve retornar 401 quando o aluno está inativo', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
-      mockQuery.mockResolvedValue({
-        rows: [{ id: 10, unit_id: 1, status: 'inativo' }],
-        rowCount: 1,
-      });
+    it('deve retornar 401 quando a unidade do token não existe', async () => {
+      mockVerify.mockReturnValue({ sub: 'google-sub', nome: 'João', unitId: 1 } as never);
+      mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
         .get('/auth/me')
@@ -251,13 +190,10 @@ describe('auth.routes', () => {
       expect(response.body).toEqual({ erro: 'token inválido ou expirado' });
     });
 
-    it('deve retornar 404 quando o perfil não é encontrado', async () => {
-      mockVerify.mockReturnValue({ studentId: 10, unitId: 1 } as never);
+    it('deve retornar 404 quando a unidade some depois da autenticação', async () => {
+      mockVerify.mockReturnValue({ sub: 'google-sub', nome: 'João', unitId: 1 } as never);
       mockQuery
-        .mockResolvedValueOnce({
-          rows: [{ id: 10, unit_id: 1, status: 'ativo' }],
-          rowCount: 1,
-        })
+        .mockResolvedValueOnce({ rows: [{ id: 1 }], rowCount: 1 })
         .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       const response = await request(createApp())
@@ -265,7 +201,7 @@ describe('auth.routes', () => {
         .set('Cookie', ['token=jwt-existente']);
 
       expect(response.status).toBe(404);
-      expect(response.body).toEqual({ erro: 'aluno não encontrado' });
+      expect(response.body).toEqual({ erro: 'unidade não encontrada' });
     });
   });
 });

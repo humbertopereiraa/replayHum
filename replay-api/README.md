@@ -10,21 +10,23 @@ replay-api/
 ├── migrations/
 │   ├── 001_init.sql                    # rode isso no seu Postgres uma vez
 │   ├── 002_unique_b2_key_video.sql     # unique em b2_key_video (confirm idempotente)
-│   └── 003_import_api_key.sql          # hash da key de importação de alunos
+│   ├── 003_import_api_key.sql          # hash da key de importação (legado, não usada no login)
+│   └── 004_acesso_google.sql           # código da quadra, token do QR e registro de logins
+├── scripts/
+│   └── gerar-acesso-unidade.mjs        # imprime código, URL do QR e o UPDATE
 ├── src/
 │   ├── config/
 │   │   └── db.ts             # conexão com o Postgres
 │   ├── middleware/
-│   │   ├── auth.ts           # JWT do aluno + API Key de upload + key de import
-│   │   └── rate-limit.ts     # tetos por IP / e-mail / aluno
+│   │   ├── auth.ts           # JWT do visitante + API Key de upload
+│   │   └── rate-limit.ts     # tetos por IP e por conta Google
 │   ├── services/
 │   │   ├── crypto.service.ts # blind index + criptografia do e-mail
-│   │   ├── otp.service.ts    # geração/verificação do código OTP
+│   │   ├── google.service.ts # confere o ID token do Google
 │   │   └── b2.service.ts     # URLs assinadas (PUT/GET) e HeadObject no B2
 │   ├── routes/
-│   │   ├── auth.routes.ts      # OTP, /me, /logout
+│   │   ├── auth.routes.ts      # Google + código da quadra, /me, /logout
 │   │   ├── upload.routes.ts    # POST /upload/sign e /upload/confirm (servidor local Go)
-│   │   ├── students.routes.ts  # POST /students/import
 │   │   └── replays.routes.ts   # GET /replays, stream, download e thumbnail
 │   └── server.ts             # junta tudo
 └── package.json
@@ -36,13 +38,14 @@ replay-api/
 - **Neon** (neon.tech) — Postgres serverless, free tier bom para começar
 
 Depois de criar o banco, rode os arquivos em `migrations/`
-(`001_init.sql`, `002_unique_b2_key_video.sql` e `003_import_api_key.sql`)
+(`001_init.sql`, `002_unique_b2_key_video.sql`, `003_import_api_key.sql`
+e `004_acesso_google.sql`)
 direto no editor SQL do painel (Supabase e Neon têm um embutido).
 
 ## Configuração
 
 1. `cp .env.example .env` e preencha com suas credenciais reais
-   (banco, B2, Resend).
+   (banco, B2 e o cliente OAuth do Google).
 2. Gere as chaves aleatórias necessárias:
    ```bash
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -57,8 +60,8 @@ direto no editor SQL do painel (Supabase e Neon têm um embutido).
 ## Bucket B2
 
 O bucket deve ser **privado**. A API nunca entrega o MP4: ela devolve
-URLs assinadas. Replay da unidade é visível para todos os alunos da
-mesma academia (regra de produto).
+URLs assinadas. Quem entrou com o código daquela quadra vê os replays
+dela. Não existe lista de alunos.
 
 - **Stream** (`GET /replays/:id/stream`): `Content-Disposition: inline`,
   válida por 1 hora — usada pelo `<video>` do site.
@@ -97,11 +100,10 @@ npm run typecheck
 
 ## Cadastro de unidade (ainda manual, para o MVP)
 
-Como ainda não existe painel administrativo, cadastre a primeira
-unidade e as duas API Keys direto no banco. São chaves **diferentes**:
+Como ainda não existe painel administrativo, cadastre a unidade e a
+API Key de upload direto no banco:
 
 - `api_key_hash` — só o servidor local Go (upload)
-- `import_api_key_hash` — só `POST /students/import`
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -109,33 +111,43 @@ node -e "console.log(require('crypto').createHash('sha256').update('COLE_A_KEY_A
 ```
 
 ```sql
-INSERT INTO units (nome, api_key_hash, import_api_key_hash)
-VALUES ('Arena Sports', 'hash_da_key_de_upload', 'hash_da_key_de_import');
+INSERT INTO units (nome, api_key_hash)
+VALUES ('Arena Sports', 'hash_da_key_de_upload');
 ```
 
 A key de upload **em texto puro** vai no `config.json` do Go
-(`Authorization: Bearer <api_key>`). A de importação não entra no Mini PC.
+(`Authorization: Bearer <api_key>`).
 
-Sem `import_api_key_hash`, o import responde 401.
+## Acesso da quadra
 
-## Cadastro de alunos
+Não há cadastro de pessoa. O código (ou o QR) escolhe a unidade e o
+Google identifica quem entrou. Cada entrada grava uma linha em `logins`.
 
-`POST /students/import` com `{ "alunos": [{ "nome", "email" }, ...] }`
-(máx. 500 por request), autenticado com a key de importação.
-Quem não vier no lote é desativado.
+Na pasta `replay-api`, com o `.env` carregado:
+
+```bash
+node scripts/gerar-acesso-unidade.mjs 1
+```
+
+O script imprime o código curto, a URL `{FRONTEND_URL}/q/{token}` e o
+`UPDATE` com os hashes. Gere o QR a partir dessa URL. O `1` é o id da
+unidade. Sem id, o SQL sai com um placeholder.
+
+No Google Cloud, crie um cliente OAuth do tipo "aplicativo da Web".
+A origem autorizada é a URL do site. O mesmo client id vai em
+`GOOGLE_CLIENT_ID` na API e em `NEXT_PUBLIC_GOOGLE_CLIENT_ID` no site.
 
 ## Endpoints disponíveis
 
 | Método | Rota | Quem chama | Autenticação |
 |---|---|---|---|
-| POST | `/auth/request-otp` | Site (aluno) | Nenhuma (rate limit) |
-| POST | `/auth/verify-otp` | Site (aluno) | Nenhuma (rate limit) |
-| POST | `/auth/logout` | Site (aluno) | Cookie opcional (sempre limpa) |
-| GET | `/auth/me` | Site (aluno) | JWT |
+| POST | `/auth/google` | Site | Código da quadra ou token do QR + ID token do Google |
+| POST | `/auth/logout` | Site | Cookie opcional (sempre limpa) |
+| GET | `/auth/me` | Site | JWT |
 | POST | `/upload/sign` | Servidor local (Go) | API Key de upload |
 | POST | `/upload/confirm` | Servidor local (Go) | API Key de upload |
-| POST | `/students/import` | Operação da unidade | API Key de importação |
-| GET | `/replays` | Site (aluno) | JWT |
-| GET | `/replays/:id/stream` | Site (aluno) | JWT (30/min por aluno) |
-| GET | `/replays/:id/download` | Site (aluno) | JWT (30/min por aluno) |
-| GET | `/replays/:id/thumbnail` | Site (aluno) | JWT |
+| GET | `/replays` | Site | JWT |
+| GET | `/replays/:id/stream` | Site | JWT (30/min por conta Google) |
+| GET | `/replays/:id/download` | Site | JWT (30/min por conta Google) |
+| GET | `/replays/:id/thumbnail` | Site | JWT |
+

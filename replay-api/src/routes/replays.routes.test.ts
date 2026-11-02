@@ -1,9 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 
 jest.mock('../middleware/auth', () => ({
-  autenticarAluno: (req: Request, _res: Response, next: NextFunction) => {
+  autenticarUsuario: (req: Request, _res: Response, next: NextFunction) => {
     req.unitId = 1;
-    req.studentId = 10;
+    req.googleSub = 'google-sub';
     next();
   },
 }));

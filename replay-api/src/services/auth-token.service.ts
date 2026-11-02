@@ -23,9 +23,9 @@ export function extrairToken(req: Request): string | undefined {
   return undefined;
 }
 
-export function emitirToken(aluno: { id: number; unit_id: number }): string {
+export function emitirToken(sessao: { sub: string; nome: string; unitId: number }): string {
   return jwt.sign(
-    { studentId: aluno.id, unitId: aluno.unit_id },
+    { sub: sessao.sub, nome: sessao.nome, unitId: sessao.unitId },
     process.env.JWT_SECRET!,
     { expiresIn: '7d' }
   );

@@ -3,7 +3,7 @@ import type { Request } from 'express';
 type MockRequestOverrides = Partial<
   Pick<Request, 'body' | 'query' | 'params' | 'cookies' | 'headers'>
 > & {
-  studentId?: number;
+  googleSub?: string;
   unitId?: number;
 };
 

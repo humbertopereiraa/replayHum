@@ -1,8 +1,7 @@
 process.env.EMAIL_HASH_KEY = 'chave-teste-hash';
 process.env.EMAIL_ENCRYPTION_KEY = '0'.repeat(64);
 process.env.JWT_SECRET = 'jwt-secreto-teste';
-process.env.RESEND_API_KEY = 're_teste';
-process.env.RESEND_FROM = 'Replay <noreply@test.com>';
+process.env.GOOGLE_CLIENT_ID = 'client-teste.apps.googleusercontent.com';
 process.env.B2_ENDPOINT = 'https://s3.test.com';
 process.env.B2_REGION = 'us-east-1';
 process.env.B2_BUCKET = 'bucket-test';

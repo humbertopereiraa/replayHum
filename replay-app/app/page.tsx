@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google'
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,7 +13,6 @@ import {
   Film,
   LockKeyhole,
   LogOut,
-  Mail,
   Menu,
   Play,
   ShieldCheck,
@@ -31,17 +31,15 @@ import {
   isSessionLocked,
   listReplays,
   lockSession,
+  loginGoogle,
   logout as encerrarSessao,
-  requestOtp,
   setToken,
-  verifyOtp,
   type AuthResponse,
   type PerfilResponse,
   type ReplayRow,
 } from '@/lib/api'
 
-type View = 'landing' | 'email' | 'otp' | 'dashboard' | 'detail'
-type AuthSuccess = Extract<AuthResponse, { status: 'autenticado' }>
+type View = 'landing' | 'login' | 'dashboard' | 'detail'
 type Replay = {
   id: number
   court: string
@@ -52,7 +50,6 @@ type Replay = {
   expired?: boolean
 }
 
-const OTP_SECONDS = 5 * 60
 const RETENTION_MS = 48 * 60 * 60 * 1000
 
 function isoDate(offsetDays = 0): string {
@@ -69,12 +66,6 @@ function formatDuration(seg: number | null): string {
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function formatCountdown(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 function mapReplay(row: ReplayRow): Replay {
@@ -136,11 +127,11 @@ function PublicHeader({ onLogin }: { onLogin: () => void }) {
 
 function Landing({ onLogin }: { onLogin: () => void }) {
   return <div className="landing"><PublicHeader onLogin={onLogin} /><main>
-    <section className="hero container"><div className="hero-copy"><div className="eyebrow"><Sparkles data-icon="inline-start" /> Seu momento, do seu jeito</div><h1>Reviva os melhores momentos da sua partida.</h1><p className="hero-text">Assista aos seus replays esportivos em poucos segundos. Acesse, assista e baixe suas jogadas diretamente pelo celular.</p><div className="hero-actions"><Button onClick={onLogin}>Ver meus replays <ArrowRight data-icon="inline-end" /></Button><span><ShieldCheck data-icon="inline-start" /> Disponível para alunos cadastrados</span></div></div><div className="hero-visual"><div className="video-preview"><img src="/replay-court.png" alt="Replay de uma quadra esportiva" /><div className="video-top"><span className="live-dot">REPLAY</span><span>00:30</span></div><button className="play-button" aria-label="Reproduzir prévia"><Play fill="currentColor" /></button><div className="video-bottom"><span>Quadra 2</span><span>19:42</span></div></div><div className="floating-card"><span className="avatar-small">JS</span><div><strong>Seu replay está pronto</strong><small>Agora mesmo · Arena Central</small></div><Check className="success-icon" /></div></div></section>
+    <section className="hero container"><div className="hero-copy"><div className="eyebrow"><Sparkles data-icon="inline-start" /> Seu momento, do seu jeito</div><h1>Reviva os melhores momentos da sua partida.</h1><p className="hero-text">Assista aos seus replays esportivos em poucos segundos. Acesse, assista e baixe suas jogadas diretamente pelo celular.</p><div className="hero-actions"><Button onClick={onLogin}>Ver meus replays <ArrowRight data-icon="inline-end" /></Button><span><ShieldCheck data-icon="inline-start" /> Entre com o código da quadra</span></div></div><div className="hero-visual"><div className="video-preview"><img src="/replay-court.png" alt="Replay de uma quadra esportiva" /><div className="video-top"><span className="live-dot">REPLAY</span><span>00:30</span></div><button className="play-button" aria-label="Reproduzir prévia"><Play fill="currentColor" /></button><div className="video-bottom"><span>Quadra 2</span><span>19:42</span></div></div><div className="floating-card"><span className="avatar-small">JS</span><div><strong>Seu replay está pronto</strong><small>Agora mesmo · Arena Central</small></div><Check className="success-icon" /></div></div></section>
     <section id="como-funciona" className="steps-section"><div className="container"><div className="section-heading"><span className="eyebrow">Simples desde o primeiro ponto</span><h2>Como funciona</h2><p>Da quadra para o seu celular em três passos.</p></div><div className="steps-grid"><Step number="01" icon={<Trophy />} title="Jogue" text="Faça sua jogada normalmente." /><Step number="02" icon={<Zap />} title="Acione o replay" text="Pressione o botão disponível na quadra ao terminar." /><Step number="03" icon={<Smartphone />} title="Reviva" text="Acesse seus últimos 30 segundos pelo celular." /></div></div></section>
     <section id="beneficios" className="benefits-section"><div className="container benefits-layout"><div><span className="eyebrow">Feito para o seu jogo</span><h2>Seu melhor lance merece replay.</h2><p>Uma experiência rápida e segura para você guardar cada momento importante.</p></div><div className="benefits-grid"><Benefit icon={<Film />} title="Tudo em um só lugar" /><Benefit icon={<Smartphone />} title="Acesso rápido pelo celular" /><Benefit icon={<Clock3 />} title="Assista quando quiser" /><Benefit icon={<CloudDownload />} title="Baixe seus vídeos" /><Benefit icon={<LockKeyhole />} title="Acesso exclusivo e seguro" /></div></div></section>
-    <section className="final-cta container"><div><span className="eyebrow">Próximo ponto: o replay</span><h2>Pronto para rever sua jogada?</h2><p>Entre com o e-mail cadastrado pela sua academia para acessar seus replays.</p></div><Button onClick={onLogin}>Acessar meus replays <ArrowRight data-icon="inline-end" /></Button></section>
-  </main><footer className="footer container"><Brand /><span>Acesso exclusivo para alunos cadastrados</span><span>Fale com a recepção da sua academia caso precise de ajuda.</span></footer></div>
+    <section className="final-cta container"><div><span className="eyebrow">Próximo ponto: o replay</span><h2>Pronto para rever sua jogada?</h2><p>Digite o código da quadra e entre com o Google para acessar seus replays.</p></div><Button onClick={onLogin}>Acessar meus replays <ArrowRight data-icon="inline-end" /></Button></section>
+  </main><footer className="footer container"><Brand /><span>Acesso com o código da quadra</span><span>Peça o código na quadra caso precise de ajuda.</span></footer></div>
 }
 
 function Step({ number, icon, title, text }: { number: string; icon: React.ReactNode; title: string; text: string }) { return <div className="step"><div className="step-top"><span>{number}</span><div className="step-icon">{icon}</div></div><h3>{title}</h3><p>{text}</p></div> }
@@ -148,151 +139,90 @@ function Benefit({ icon, title }: { icon: React.ReactNode; title: string }) { re
 
 function AuthHeader({ onBack }: { onBack: () => void }) { return <header className="auth-header container"><Brand onClick={onBack} /><span className="secure-label"><LockKeyhole data-icon="inline-start" /> Acesso seguro</span></header> }
 
-function Login({ view, setView, onAuthenticated }: { view: 'email' | 'otp'; setView: (v: View) => void; onAuthenticated: (result: AuthSuccess) => void }) {
-  const [email, setEmail] = useState('')
+function BotaoGoogle({ disabled, onCredential, onError }: { disabled?: boolean; onCredential: (credential: string) => void; onError: () => void }) {
+  const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+  if (!clientId) {
+    return <span className="field-error">Login do Google não configurado.</span>
+  }
+  if (disabled) {
+    return <Button disabled>Entrando...</Button>
+  }
+  return (
+    <GoogleOAuthProvider clientId={clientId}>
+      <GoogleLogin
+        onSuccess={resp => {
+          if (resp.credential) onCredential(resp.credential)
+          else onError()
+        }}
+        onError={onError}
+        text="continue_with"
+        shape="rectangular"
+        width={320}
+      />
+    </GoogleOAuthProvider>
+  )
+}
+
+function Login({ qrToken, setView, onAuthenticated }: { qrToken?: string; setView: (v: View) => void; onAuthenticated: (result: AuthResponse) => void }) {
+  const [codigo, setCodigo] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [code, setCode] = useState(['', '', '', '', '', ''])
-  const [otpError, setOtpError] = useState('')
-  const [otpLoading, setOtpLoading] = useState(false)
-  const [secondsLeft, setSecondsLeft] = useState(OTP_SECONDS)
-  const [otpTick, setOtpTick] = useState(0)
-  const [hasSavedSession, setHasSavedSession] = useState(() => !!getToken())
+  const codigoPronto = codigo.trim().length > 0
+  const podeGoogle = Boolean(qrToken) || codigoPronto
 
-  useEffect(() => {
-    if (view !== 'otp') return
-    setSecondsLeft(OTP_SECONDS)
-    const id = window.setInterval(() => {
-      setSecondsLeft(s => (s <= 1 ? 0 : s - 1))
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [view, otpTick])
-
-  function goAuthenticated(result: AuthResponse) {
-    if (result.status !== 'autenticado') return false
-    onAuthenticated(result)
-    return true
-  }
-
-  const submitEmail = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!email.includes('@')) {
-      setError('Digite um e-mail válido.')
-      return
-    }
+  const entrar = async (credential: string) => {
     setLoading(true)
     setError('')
     try {
-      const result = await requestOtp(email)
-      if (!goAuthenticated(result)) setView('otp')
+      const result = await loginGoogle(
+        credential,
+        qrToken ? { qrToken } : { codigo: codigo.trim() }
+      )
+      onAuthenticated(result)
     } catch (err) {
-      setError(errorMessage(err, 'Não foi possível enviar o código.'))
+      setError(errorMessage(err, 'Não foi possível entrar.'))
     } finally {
       setLoading(false)
     }
-  }
-
-  const switchAccount = async () => {
-    await encerrarSessao()
-    setHasSavedSession(false)
-    setError('')
-  }
-
-  const submitCode = async () => {
-    const codigo = code.join('')
-    if (codigo.length < 6) {
-      setOtpError('Digite os 6 dígitos do código.')
-      return
-    }
-    setOtpLoading(true)
-    setOtpError('')
-    try {
-      const result = await verifyOtp(email, codigo)
-      if (!goAuthenticated(result)) {
-        setOtpError('Não foi possível confirmar o código.')
-      }
-    } catch (err) {
-      setOtpError(errorMessage(err, 'Código inválido ou expirado.'))
-    } finally {
-      setOtpLoading(false)
-    }
-  }
-
-  const resendCode = async () => {
-    setOtpError('')
-    try {
-      const result = await requestOtp(email)
-      if (goAuthenticated(result)) return
-      setCode(['', '', '', '', '', ''])
-      setOtpTick(n => n + 1)
-      setOtpError('Um novo código foi enviado para o seu e-mail.')
-    } catch (err) {
-      setOtpError(errorMessage(err, 'Não foi possível reenviar o código.'))
-    }
-  }
-
-  const updateCode = (value: string, index: number) => {
-    const digit = value.replace(/\D/g, '').slice(-1)
-    const next = [...code]
-    next[index] = digit
-    setCode(next)
-    if (digit && index < 5) document.getElementById(`otp-${index + 1}`)?.focus()
   }
 
   return (
     <div className="auth-page">
       <AuthHeader onBack={() => setView('landing')} />
       <main className="auth-main">
-        {view === 'email' ? (
-          <form className="auth-card" onSubmit={submitEmail}>
-            <div className="auth-icon"><Mail /></div>
-            <span className="eyebrow">Área do aluno</span>
-            <h1>Acesse seus replays</h1>
-            <p>Use o e-mail cadastrado pela sua academia para entrar.</p>
-            <label htmlFor="email">E-mail</label>
-            <input id="email" type="email" value={email} onChange={e => { setEmail(e.target.value); setError('') }} placeholder="voce@email.com" aria-invalid={!!error} />
-            {error && <span className="field-error">{error}</span>}
-            <Button type="submit" disabled={loading}>
-              {loading
-                ? (hasSavedSession ? 'Entrando...' : 'Enviando código...')
-                : hasSavedSession
-                  ? <>Entrar <ArrowRight data-icon="inline-end" /></>
-                  : <>Enviar código <ArrowRight data-icon="inline-end" /></>}
-            </Button>
-            {hasSavedSession && (
-              <button className="back-link" type="button" onClick={() => void switchAccount()}>Usar outro e-mail</button>
-            )}
-            <small>Não tem cadastro? Fale com a recepção da sua academia.</small>
-            <button className="back-link" type="button" onClick={() => setView('landing')}><ArrowLeft data-icon="inline-start" /> Voltar para o início</button>
-          </form>
-        ) : (
-          <div className="auth-card">
-            <button className="back-link otp-back" onClick={() => setView('email')}><ArrowLeft data-icon="inline-start" /> Voltar</button>
-            <span className="eyebrow">Confirmação</span>
-            <h1>Digite o código</h1>
-            <p>Enviamos um código de 6 dígitos para <strong>{email || 'seu e-mail'}</strong>.</p>
-            <div className="otp-row">{code.map((digit, index) => <input key={index} id={`otp-${index}`} inputMode="numeric" maxLength={1} value={digit} onChange={e => updateCode(e.target.value, index)} aria-label={`Dígito ${index + 1}`} />)}</div>
-            {otpError && <span className="field-error">{otpError}</span>}
-            <div className="expiry"><Clock3 /> Expira em <strong>{formatCountdown(secondsLeft)}</strong></div>
-            <Button onClick={submitCode} disabled={otpLoading}>{otpLoading ? 'Confirmando...' : <>Confirmar <Check data-icon="inline-end" /></>}</Button>
-            <button className="resend" onClick={resendCode}>Reenviar código</button>
-          </div>
-        )}
+        <div className="auth-card">
+          <div className="auth-icon"><LockKeyhole /></div>
+          <span className="eyebrow">{qrToken ? 'Acesso da quadra' : 'Código da quadra'}</span>
+          <h1>Acesse seus replays</h1>
+          <p>{qrToken ? 'Entre com o Google para ver os lances desta quadra.' : 'Digite o código da quadra e entre com o Google.'}</p>
+          {qrToken ? null : (
+            <>
+              <label htmlFor="codigo">Código</label>
+              <input id="codigo" value={codigo} onChange={e => { setCodigo(e.target.value); setError('') }} placeholder="Código da quadra" autoComplete="off" aria-invalid={!!error} />
+            </>
+          )}
+          {podeGoogle && (
+            <BotaoGoogle disabled={loading} onCredential={credential => void entrar(credential)} onError={() => setError('Não foi possível entrar com o Google.')} />
+          )}
+          {error && <span className="field-error">{error}</span>}
+          <small>Peça o código na quadra caso precise de ajuda.</small>
+          <button className="back-link" type="button" onClick={() => setView('landing')}><ArrowLeft data-icon="inline-start" /> Voltar para o início</button>
+        </div>
       </main>
     </div>
   )
 }
 
-function AppHeader({ onLogout, onHome, alunoNome, unidadeNome }: { onLogout: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
-  const nome = alunoNome || 'Aluno'
-  const unidade = unidadeNome || 'Sua academia'
+function AppHeader({ onLogout, onHome, nomeUsuario, unidadeNome }: { onLogout: () => void; onHome: () => void; nomeUsuario?: string; unidadeNome?: string }) {
+  const nome = nomeUsuario || 'Visitante'
+  const unidade = unidadeNome || 'Sua quadra'
   return (
     <header className="app-header">
       <div className="container app-header-inner">
         <Brand onClick={onHome} />
         <div className="unit">
           <span className="unit-dot" />
-          <span><small>Unidade cadastrada</small><strong>{unidade}</strong></span>
+          <span><small>Unidade</small><strong>{unidade}</strong></span>
           <ChevronDown />
         </div>
         <button className="user-menu" onClick={onLogout}>
@@ -305,7 +235,7 @@ function AppHeader({ onLogout, onHome, alunoNome, unidadeNome }: { onLogout: () 
   )
 }
 
-function Dashboard({ onDetail, onLogout, onUnauthorized, onHome, alunoNome, unidadeNome }: { onDetail: (r: Replay) => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
+function Dashboard({ onDetail, onLogout, onUnauthorized, onHome, nomeUsuario, unidadeNome }: { onDetail: (r: Replay) => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; nomeUsuario?: string; unidadeNome?: string }) {
   const [court, setCourt] = useState('')
   const [date, setDate] = useState('')
   const [courts, setCourts] = useState<string[]>([])
@@ -364,12 +294,12 @@ function Dashboard({ onDetail, onLogout, onUnauthorized, onHome, alunoNome, unid
 
   return (
     <div className="app-page">
-      <AppHeader onLogout={onLogout} onHome={onHome} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+      <AppHeader onLogout={onLogout} onHome={onHome} nomeUsuario={nomeUsuario} unidadeNome={unidadeNome} />
       <main className="container dashboard-main">
         <div className="dashboard-heading">
           <div>
-            <span className="eyebrow">Área do aluno</span>
-            <h1>Olá{alunoNome ? `, ${primeiroNome(alunoNome)}` : ''} <span className="wave">⌁</span></h1>
+            <span className="eyebrow">Seus lances</span>
+            <h1>Olá{nomeUsuario ? `, ${primeiroNome(nomeUsuario)}` : ''} <span className="wave">⌁</span></h1>
             <p>Confira seus últimos replays.</p>
           </div>
           <div className="replay-count"><strong>{loading ? '—' : replays.length}</strong><span>replays disponíveis</span></div>
@@ -489,7 +419,7 @@ function ReplayCard({ replay, onDetail, onDownload }: { replay: Replay; onDetail
   )
 }
 
-function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, unidadeNome }: { replay: Replay; onBack: () => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; alunoNome?: string; unidadeNome?: string }) {
+function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, nomeUsuario, unidadeNome }: { replay: Replay; onBack: () => void; onLogout: () => void; onUnauthorized: () => void; onHome: () => void; nomeUsuario?: string; unidadeNome?: string }) {
   const [playing, setPlaying] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [thumbUrl, setThumbUrl] = useState<string | null>(null)
@@ -538,7 +468,7 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
 
   return (
     <div className="app-page">
-      <AppHeader onLogout={onLogout} onHome={onHome} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+      <AppHeader onLogout={onLogout} onHome={onHome} nomeUsuario={nomeUsuario} unidadeNome={unidadeNome} />
       <main className="container detail-main">
         <button className="back-link" onClick={onBack}><ArrowLeft data-icon="inline-start" /> Voltar para meus replays</button>
         <div className="detail-heading">
@@ -592,8 +522,8 @@ function Detail({ replay, onBack, onLogout, onUnauthorized, onHome, alunoNome, u
   )
 }
 
-export default function Page() {
-  const [view, setView] = useState<View>('landing')
+export function ReplayApp({ qrToken }: { qrToken?: string }) {
+  const [view, setView] = useState<View>(qrToken ? 'login' : 'landing')
   const [selected, setSelected] = useState<Replay | null>(null)
   const [perfil, setPerfil] = useState<PerfilResponse | null>(null)
 
@@ -626,9 +556,9 @@ export default function Page() {
     return () => { cancelled = true }
   }, [invalidarSessao])
 
-  const onAuthenticated = (result: AuthSuccess) => {
+  const onAuthenticated = (result: AuthResponse) => {
     setToken(result.token)
-    setPerfil({ aluno: result.aluno, unidade: result.unidade })
+    setPerfil({ usuario: result.usuario, unidade: result.unidade })
     setView('dashboard')
   }
 
@@ -637,12 +567,16 @@ export default function Page() {
     setView('detail')
   }
 
-  const alunoNome = perfil?.aluno.nome
+  const nomeUsuario = perfil?.usuario.nome
   const unidadeNome = perfil?.unidade.nome
 
-  if (view === 'landing') return <Landing onLogin={() => setView('email')} />
-  if (view === 'email' || view === 'otp') return <Login view={view} setView={setView} onAuthenticated={onAuthenticated} />
-  if (view === 'dashboard') return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
-  if (!selected) return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
-  return <Detail replay={selected} onBack={() => setView('dashboard')} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} alunoNome={alunoNome} unidadeNome={unidadeNome} />
+  if (view === 'landing') return <Landing onLogin={() => setView('login')} />
+  if (view === 'login') return <Login qrToken={qrToken} setView={setView} onAuthenticated={onAuthenticated} />
+  if (view === 'dashboard') return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} nomeUsuario={nomeUsuario} unidadeNome={unidadeNome} />
+  if (!selected) return <Dashboard onDetail={openDetail} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} nomeUsuario={nomeUsuario} unidadeNome={unidadeNome} />
+  return <Detail replay={selected} onBack={() => setView('dashboard')} onLogout={sair} onUnauthorized={invalidarSessao} onHome={() => setView('dashboard')} nomeUsuario={nomeUsuario} unidadeNome={unidadeNome} />
+}
+
+export default function Page() {
+  return <ReplayApp />
 }
